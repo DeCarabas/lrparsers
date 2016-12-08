@@ -192,6 +192,8 @@ class GenerateLR0(object):
           the other actions are always associated with terminals.)
 
         - 'accept': Accept the result of the parse, it worked.
+
+        Anything missing from the row indicates an error.
         """
         action_table = []
         config_sets = self.gen_all_sets()
@@ -202,17 +204,24 @@ class GenerateLR0(object):
             for config in config_set:
                 if config.at_end:
                     if config.name != '__start':
-                        actions.update({
-                            a: ('reduce', config.name, len(config.symbols))
-                            for a in self.terminals
-                        })
+                        for a in self.terminals:
+                            self.set_table_action(
+                                actions,
+                                a,
+                                ('reduce', config.name, len(config.symbols)),
+                            )
                     else:
-                        actions['$'] = ('accept',)
+                        self.set_table_action(actions, '$', ('accept',))
+
                 else:
                     if config.next in self.terminals:
                         successor = self.gen_successor(config_set, config.next)
                         index = self.find_set_index(config_sets, successor)
-                        actions[config.next] = ('shift', index)
+                        self.set_table_action(
+                            actions,
+                            config.next,
+                            ('shift', index),
+                        )
 
             # Gotos
             for symbol in self.nonterminals:
@@ -224,6 +233,22 @@ class GenerateLR0(object):
             action_table.append(actions)
 
         return action_table
+
+    def set_table_action(self, row, symbol, action):
+        """Set the action for 'symbol' in the table row to 'action'.
+
+        This is destructive; it changes the table. It raises an error if
+        there is already an action for the symbol in the row.
+        """
+        existing = row.get(symbol, None)
+        if existing is not None:
+            raise ValueError(
+                "Conflict: {old} vs {new}",
+                old=existing,
+                new=action,
+            )
+        row[symbol] = action
+
 
 
 def parse(table, input, trace=False):
