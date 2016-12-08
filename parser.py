@@ -1,6 +1,7 @@
 # This is doty playing with parser tables.
 from collections import namedtuple
 
+
 class Configuration(
     namedtuple('Configuration', ['name', 'symbols', 'position'])
 ):
@@ -188,8 +189,8 @@ class GenerateLR0(object):
     def gen_table(self):
         """Generate the parse table.
 
-        The parse table is a list of states. The first state in the list is the starting
-        state. Each state is a dictionary that maps a symbol to an
+        The parse table is a list of states. The first state in the list is
+        the starting state. Each state is a dictionary that maps a symbol to an
         action. Each action is a tuple. The first element of the tuple is a
         string describing what to do:
 
@@ -259,14 +260,11 @@ class GenerateLR0(object):
         there is already an action for the symbol in the row.
         """
         existing = row.get(symbol, None)
-        if existing is not None:
+        if existing is not None and existing != action:
             raise ValueError(
-                "Conflict: {old} vs {new}",
-                old=existing,
-                new=action,
+                "Conflict: {old} vs {new}".format(old=existing, new=action)
             )
         row[symbol] = action
-
 
 
 def parse(table, input, trace=False):
@@ -370,7 +368,7 @@ def format_table(generator, table):
     return '\n'.join(lines)
 
 
-# OK, this is
+# OK, this is a very simple LR0 grammar.
 grammar_simple = [
     ('E', ['E', '+', 'T']),
     ('E', ['T']),
@@ -383,5 +381,25 @@ table = gen.gen_table()
 tree = parse(table, ['id', '+', '(', 'id', ')'])
 print(format_node(tree))
 
-grammar_lr0_conflict = [
-]
+# This one doesn't work with LR0, though, it has a shift/reduce conflict.
+try:
+    grammar_lr0_conflict = grammar_simple + [
+        ('T', ['id', '[', 'E', ']']),
+    ]
+    gen = GenerateLR0(grammar_lr0_conflict, 'E')
+    table = gen.gen_table()
+    assert False
+except ValueError as e:
+    print(e)
+
+# Nor does this: it has a reduce/reduce conflict.
+try:
+    grammar_lr0_conflict = grammar_simple + [
+        ('E', ['V', '=', 'E']),
+        ('V', ['id']),
+    ]
+    gen = GenerateLR0(grammar_lr0_conflict, 'E')
+    table = gen.gen_table()
+    assert False
+except ValueError as e:
+    print(e)
