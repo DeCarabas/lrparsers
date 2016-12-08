@@ -1,5 +1,5 @@
 # This is doty playing with parser tables.
-from collections import namedtuple
+from collections import namedtuple, OrderedDict
 
 # This is how we define a grammar: as a list of productions. Should be
 # self-evident. Note that we don't support alternatives or other complex
@@ -35,11 +35,12 @@ class Configuration(
     def at_end(self):
         return self.position == len(self.symbols)
 
+    @property
+    def next(self):
+        return self.symbols[self.position] if not self.at_end else None
+
     def at_symbol(self, symbol):
-        return (
-            self.position < len(self.symbols) and
-            self.symbols[self.position] == symbol
-        )
+        return self.next == symbol
 
     def __str__(self):
         return "{name} -> {bits}".format(
@@ -60,10 +61,6 @@ class GenerateLR0(object):
     """
     def __init__(self, grammar, start):
         self.grammar = [('__start', start)] + grammar
-        self.alphabet = set(
-            [rule[0] for rule in grammar] +
-            [sym for rule in grammar for sym in rule[1]]
-        )
         self.nonterminals = set(rule[0] for rule in grammar)
         self.terminals = set(
             sym
@@ -74,17 +71,31 @@ class GenerateLR0(object):
         self.alphabet = self.terminals | self.nonterminals
 
     def gen_closure_next(self, config):
-        if config.position == len(config.symbols):
+        """Return the next set of configurations in the closure for
+        config.
+
+        If the position for config is just before a non-terminal, then the
+        next set of configurations is configurations for all of the
+        productions for that non-terminal, with the position at the
+        beginning. (If the position for config is just before a terminal,
+        or at the end of the production, then the next set is empty.)
+        """
+        if config.at_end:
             return ()
         else:
-            next = config.symbols[config.position]
             return tuple(
                 Configuration.from_rule(rule)
                 for rule in self.grammar
-                if rule[0] == next
+                if rule[0] == config.next
             )
 
     def gen_closure(self, config, closure):
+        """Compute the closure for the specified config and unify it with the
+        existing closure.
+
+        If the provided config is already in the closure then nothing is
+        done.
+        """
         if config in closure:
             return closure
         else:
@@ -94,6 +105,12 @@ class GenerateLR0(object):
             return new_closure
 
     def gen_successor(self, config_set, symbol):
+        """Compute the successor state for the given config set and the
+        given symbol.
+
+        The successor represents the next state of the parser after seeing
+        the symbol.
+        """
         seeds = [
             Configuration(
                 name=config.name,
@@ -110,32 +127,72 @@ class GenerateLR0(object):
 
         return closure
 
-    def gen_sets_step(self, config_set, F):
+    def gen_all_successors(self, config_set):
+        """Return all of the non-empty successors for the given config set."""
+        next = []
+        for symbol in self.alphabet:
+            successor = self.gen_successor(config_set, symbol)
+            if len(successor) > 0:
+                next.append(successor)
+
+        return tuple(next)
+
+    def gen_sets(self, config_set, F):
+        """Recursively generate all configuration sets starting from the
+        provided set, and merge them with the provided set 'F'.
+        """
         if config_set in F:
             return F
         else:
             new_F = F + (config_set,)
-            for sym in self.alphabet:
-                successor = self.gen_successor(config_set, sym)
-                if len(successor) > 0:
-                    new_F = self.gen_sets_step(successor, new_F)
+            for successor in self.gen_all_successors(config_set):
+                new_F = self.gen_sets(successor, new_F)
 
             return new_F
 
     def gen_all_sets(self):
+        """Generate all of the configuration sets for the grammar."""
         initial_set = self.gen_closure(
             Configuration.from_rule(self.grammar[0]),
             (),
         )
-        return self.gen_sets_step(initial_set, ())
+        return self.gen_sets(initial_set, ())
 
     def find_set_index(self, sets, set):
+        """Find the specified set in the set of sets, and return the
+        index, or None if it is not found.
+        """
         for i, s in enumerate(sets):
             if s == set:
                 return i
         return None
 
     def gen_table(self):
+        """Generate the parse table.
+
+        The parse table is a list of states. The first state in the list is the starting
+        state. Each state is a dictionary that maps a symbol to an
+        action. Each action is a tuple. The first element of the tuple is a
+        string describing what to do:
+
+        - 'shift': The second element of the tuple is the state
+          number. Consume the input and push that state onto the stack.
+
+        - 'reduce': The second element is the name of the non-terminal being
+          reduced, and the third element is the number of states to remove
+          from the stack. Don't consume the input; just remove the specified
+          number of things from the stack, and then consult the table again,
+          this time using the new top-of-stack as the current state and the
+          name of the non-terminal to find out what to do.
+
+        - 'goto': The second element is the state number to push onto the
+          stack. In the literature, these entries are treated distinctly from
+          the actions, but we mix them here because they never overlap with the
+          other actions. (These are always associated with non-terminals, and
+          the other actions are always associated with terminals.)
+
+        - 'accept': Accept the result of the parse, it worked.
+        """
         action_table = []
         config_sets = self.gen_all_sets()
         for config_set in config_sets:
@@ -152,11 +209,10 @@ class GenerateLR0(object):
                     else:
                         actions['$'] = ('accept',)
                 else:
-                    next = config.symbols[config.position]
-                    if next in self.terminals:
-                        successor = self.gen_successor(config_set, next)
+                    if config.next in self.terminals:
+                        successor = self.gen_successor(config_set, config.next)
                         index = self.find_set_index(config_sets, successor)
-                        actions[next] = ('shift', index)  #, successor)
+                        actions[config.next] = ('shift', index)
 
             # Gotos
             for symbol in self.nonterminals:
