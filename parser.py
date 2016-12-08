@@ -1,25 +1,5 @@
 # This is doty playing with parser tables.
-from collections import namedtuple, OrderedDict
-
-# This is how we define a grammar: as a list of productions. Should be
-# self-evident. Note that we don't support alternatives or other complex
-# rules-- you must reduce those to this style explicitly.
-#
-# Also note that you don't have to make an explicit list of tokens-- if a
-# symbol is on the right-hand-side of a production in this grammar and it
-# doesn't appear on the left-hand-side of any production then it must be a
-# token.
-#
-# ALSO note that the token '$' is reserved to mean "end of input", so don't use
-# it in your grammars.
-#
-grammar_simple = [
-    ('E', ['E', '+', 'T']),
-    ('E', ['T']),
-    ('T', ['(', 'E', ')']),
-    ('T', ['id']),
-]
-
+from collections import namedtuple
 
 class Configuration(
     namedtuple('Configuration', ['name', 'symbols', 'position'])
@@ -55,11 +35,35 @@ class Configuration(
 class GenerateLR0(object):
     """Generate parser tables for an LR0 parser.
 
-    Note that this is built in the dumbest way possible, in order to be the
-    most understandable it can be. I built this to learn, and I want to make
-    sure I can keep learning with it.
+    Grammars are of the form:
+
+      grammar_simple = [
+        ('E', ['E', '+', 'T']),
+        ('E', ['T']),
+        ('T', ['(', 'E', ')']),
+        ('T', ['id']),
+      ]
+
+    Which is to say, they are a list of productions. Each production is a
+    tuple where the first element of the tuple is the name of the
+    non-terminal being added, and the second elment of the tuple is the
+    list of terminals and non-terminals that make up the production.
+
+    Don't name anything with double-underscores; those are reserved for the
+    generator. Don't add '$' to your
+
+    Note that this is implemented in the dumbest way possible, in order to be
+    the most understandable it can be. I built this to learn, and I want to
+    make sure I can keep learning with it.
     """
     def __init__(self, grammar, start):
+        """Initialize the parser generator with the specified grammar and
+        start symbol.
+        """
+        # We always store the "augmented" grammar, which contains an initial
+        # production for the start state. grammar[0] is always the start
+        # rule, and in the set of states and table and whatever the first
+        # element is always the starting state/position.
         self.grammar = [('__start', start)] + grammar
         self.nonterminals = set(rule[0] for rule in grammar)
         self.terminals = set(
@@ -67,8 +71,22 @@ class GenerateLR0(object):
             for name, symbols in grammar
             for sym in symbols
             if sym not in self.nonterminals
-        ) | {'$'}
+        )
         self.alphabet = self.terminals | self.nonterminals
+
+        # Check to make sure they didn't use anything that will give us
+        # heartburn later.
+        reserved = [a for a in self.alphabet if a.startswith('__') or a == '$']
+        if reserved:
+            raise ValueError(
+                "Can't use {symbols} in grammars, {what} reserved.".format(
+                    symbols=' or '.join(reserved),
+                    what="it's" if len(reserved) == 1 else "they're",
+                )
+            )
+
+        self.terminals.add('$')
+        self.alphabet.add('$')
 
     def gen_closure_next(self, config):
         """Return the next set of configurations in the closure for
@@ -352,18 +370,18 @@ def format_table(generator, table):
     return '\n'.join(lines)
 
 
+# OK, this is
+grammar_simple = [
+    ('E', ['E', '+', 'T']),
+    ('E', ['T']),
+    ('T', ['(', 'E', ')']),
+    ('T', ['id']),
+]
+
 gen = GenerateLR0(grammar_simple, 'E')
-# sets = gen.gen_all_sets()
-# print(
-#     '\n\n'.join(
-#         '\n'.join(str(config) for config in config_set)
-#         for config_set in sets
-#     ),
-# )
-
-
 table = gen.gen_table()
-print(format_table(gen, table))
-print('')
 tree = parse(table, ['id', '+', '(', 'id', ')'])
 print(format_node(tree))
+
+grammar_lr0_conflict = [
+]
