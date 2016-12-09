@@ -190,6 +190,13 @@ class GenerateLR0(object):
                 return i
         return None
 
+    def gen_reduce_set(self, config):
+        """Return the set of symbols that indicate we should reduce the given
+        config.
+
+        In an LR0 parser, this is just the set of all terminals."""
+        return self.terminals
+
     def gen_table(self):
         """Generate the parse table.
 
@@ -227,7 +234,7 @@ class GenerateLR0(object):
             for config in config_set:
                 if config.at_end:
                     if config.name != '__start':
-                        for a in self.terminals:
+                        for a in self.gen_reduce_set(config):
                             self.set_table_action(
                                 actions,
                                 a,
@@ -397,6 +404,12 @@ class GenerateSLR1(GenerateLR0):
         assert None not in follow  # Should always ground out at __start
         return follow
 
+    def gen_reduce_set(self, config):
+        """Return the set of symbols that indicate we should reduce the given
+        config.
+
+        In an SLR1 parser, this is the follow set of the config nonterminal."""
+        return self.gen_follow(config.name)
 
 
 def parse(table, input, trace=False):
@@ -469,7 +482,7 @@ def format_table(generator, table):
         elif action[0] == 'reduce':
             return 'r' + str(action[1])
 
-    header = "  | {terms} | {nts}".format(
+    header = "    | {terms} | {nts}".format(
         terms=' '.join(
             '{0: <6}'.format(terminal)
             for terminal in (generator.terminals)
@@ -484,7 +497,7 @@ def format_table(generator, table):
         header,
         '-' * len(header),
     ] + [
-        "{index} | {actions} | {gotos}".format(
+        "{index: <3} | {actions} | {gotos}".format(
             index=i,
             actions=' '.join(
                 '{0: <6}'.format(format_action(row, terminal))
@@ -553,3 +566,7 @@ except ValueError as e:
 gen = GenerateSLR1('E', grammar_lr0_shift_reduce)
 print("First:  {first}".format(first=str(gen.gen_first(['E']))))
 print("Follow: {follow}".format(follow=str(gen.gen_follow('E'))))
+table = gen.gen_table()
+print(format_table(gen, table))
+tree = parse(table, ['id', '+', '(', 'id', '[', 'id', ']', ')'])
+print(format_node(tree) + "\n")
