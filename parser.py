@@ -292,7 +292,7 @@ class GenerateLR0(object):
             config_new = str(config)
             max_len = max(len(config_old), len(config_new)) + 1
             error = (
-                "Conflicting actions for {symbol}:\n"
+                "Conflicting actions for token '{symbol}':\n"
                 "  {config_old: <{max_len}}: {old}\n"
                 "  {config_new: <{max_len}}: {new}\n".format(
                     config_old=config_old,
