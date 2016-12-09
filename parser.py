@@ -23,6 +23,9 @@ class Configuration(
     def at_symbol(self, symbol):
         return self.next == symbol
 
+    def replace(self, **kwargs):
+        return self._replace(**kwargs)
+
     def __str__(self):
         return "{name} -> {bits}".format(
             name=self.name,
@@ -136,11 +139,7 @@ class GenerateLR0(object):
         the symbol.
         """
         seeds = [
-            Configuration(
-                name=config.name,
-                symbols=config.symbols,
-                position=config.position + 1,
-            )
+            config.replace(position=config.position + 1)
             for config in config_set
             if config.at_symbol(symbol)
         ]
@@ -378,6 +377,7 @@ class GenerateSLR1(GenerateLR0):
 
         assert None not in follow  # Should always ground out at __start
         return follow
+
 
 
 def parse(table, input, trace=False):
