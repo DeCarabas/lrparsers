@@ -372,7 +372,13 @@ class GenerateSLR1(GenerateLR0):
             return result
 
     def gen_follow(self, symbol):
-        """Generate the follow set for the given nonterminal."""
+        """Generate the follow set for the given nonterminal.
+
+        The follow set for a nonterminal is the set of terminals that can
+        follow the nonterminal in a valid sentence. The resulting set never
+        contains epsilon and is never empty, since we should always at least
+        ground out at '$', which is the end-of-stream marker.
+        """
         if symbol == '__start':
             return tuple('$')
 
