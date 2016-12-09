@@ -378,7 +378,7 @@ class GenerateSLR1(GenerateLR0):
                 result = result + self.gen_first(symbols[1:], visited)
             return result
 
-    def gen_follow(self, symbol):
+    def gen_follow(self, symbol, visited=None):
         """Generate the follow set for the given nonterminal.
 
         The follow set for a nonterminal is the set of terminals that can
@@ -390,6 +390,14 @@ class GenerateSLR1(GenerateLR0):
             return tuple('$')
 
         assert symbol in self.nonterminals
+
+        # Deal with left-recursion.
+        if visited is None:
+            visited = set()
+        if symbol in visited:
+            return ()
+        visited.add(symbol)
+
         follow = ()
         for production in self.grammar:
             for index, prod_symbol in enumerate(production[1]):
@@ -399,7 +407,7 @@ class GenerateSLR1(GenerateLR0):
                 first = self.gen_first(production[1][index+1:])
                 follow = follow + tuple(f for f in first if f is not None)
                 if None in first:
-                    follow = follow + self.gen_follow(production[0])
+                    follow = follow + self.gen_follow(production[0], visited)
 
         assert None not in follow  # Should always ground out at __start
         return follow
@@ -570,3 +578,18 @@ table = gen.gen_table()
 print(format_table(gen, table))
 tree = parse(table, ['id', '+', '(', 'id', '[', 'id', ']', ')'])
 print(format_node(tree) + "\n")
+
+# SLR1 can't handle this.
+grammar_aho_ullman = [
+    ('S', ['L', '=', 'R']),
+    ('S', ['R']),
+    ('L', ['*', 'R']),
+    ('L', ['id']),
+    ('R', ['L']),
+]
+try:
+    gen = GenerateSLR1('S', grammar_aho_ullman)
+    table = gen.gen_table()
+    assert False
+except ValueError as e:
+    print(e)
