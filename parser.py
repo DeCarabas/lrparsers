@@ -50,14 +50,19 @@ class GenerateLR0(object):
     non-terminal being added, and the second elment of the tuple is the
     list of terminals and non-terminals that make up the production.
 
-    Don't name anything with double-underscores; those are reserved for the
-    generator. Don't add '$' to your
+    Don't name anything with double-underscores; those are reserved for
+    the generator. Don't add '$' either, as it is reserved to mean
+    end-of-stream. Use an empty list to indicate nullability, that is:
+
+      ('O', []),
+
+    means that O can be matched with nothing.
 
     Note that this is implemented in the dumbest way possible, in order to be
     the most understandable it can be. I built this to learn, and I want to
     make sure I can keep learning with it.
     """
-    def __init__(self, grammar, start):
+    def __init__(self, start, grammar):
         """Initialize the parser generator with the specified grammar and
         start symbol.
         """
@@ -228,9 +233,15 @@ class GenerateLR0(object):
                                 actions,
                                 a,
                                 ('reduce', config.name, len(config.symbols)),
+                                config,
                             )
                     else:
-                        self.set_table_action(actions, '$', ('accept',))
+                        self.set_table_action(
+                            actions,
+                            '$',
+                            ('accept',),
+                            config,
+                        )
 
                 else:
                     if config.next in self.terminals:
@@ -240,6 +251,7 @@ class GenerateLR0(object):
                             actions,
                             config.next,
                             ('shift', index),
+                            config,
                         )
 
             # Gotos
@@ -247,24 +259,125 @@ class GenerateLR0(object):
                 successor = self.gen_successor(config_set, symbol)
                 index = self.find_set_index(config_sets, successor)
                 if index is not None:
-                    actions[symbol] = ('goto', index)
+                    self.set_table_action(
+                        actions,
+                        symbol,
+                        ('goto', index),
+                        None,
+                    )
 
+            # set_table_action stores the configs that generated the actions in
+            # the table, for diagnostic purposes. This filters them out again
+            # so that the parser has something clean to work with.
+            actions = {k: self.get_table_action(actions, k) for k in actions}
             action_table.append(actions)
 
         return action_table
 
-    def set_table_action(self, row, symbol, action):
+    def set_table_action(self, row, symbol, action, config):
         """Set the action for 'symbol' in the table row to 'action'.
 
         This is destructive; it changes the table. It raises an error if
         there is already an action for the symbol in the row.
         """
-        existing = row.get(symbol, None)
+        existing, existing_config = row.get(symbol, (None, None))
         if existing is not None and existing != action:
-            raise ValueError(
-                "Conflict: {old} vs {new}".format(old=existing, new=action)
+            config_old = str(existing_config)
+            config_new = str(config)
+            max_len = max(len(config_old), len(config_new)) + 1
+            error = (
+                "Conflicting actions for {symbol}:\n"
+                "  {config_old: <{max_len}}: {old}\n"
+                "  {config_new: <{max_len}}: {new}\n".format(
+                    config_old=config_old,
+                    config_new=config_new,
+                    max_len=max_len,
+                    old=existing,
+                    new=action,
+                    symbol=symbol,
+                )
             )
-        row[symbol] = action
+            raise ValueError(error)
+        row[symbol] = (action, config)
+
+    def get_table_action(self, row, symbol):
+        return row[symbol][0]
+
+
+class GenerateSLR1(GenerateLR0):
+    """Generate parse tables for SLR1 grammars.
+
+    boop
+    """
+    def gen_first_symbol(self, symbol, visited):
+        """Compute the first set for a single symbol.
+
+        'visited' is a set of already visited symbols, to stop infinite
+        recursion on left-recursive grammars. That means that sometimes this
+        function can return an empty tuple. Don't confuse that with a tuple
+        containing epsilon: that's a tuple containing 'None', not an empty
+        tuple.
+        """
+        if symbol in self.terminals:
+            return (symbol,)
+        elif symbol in visited:
+            return ()
+        else:
+            assert symbol in self.nonterminals
+            visited.add(symbol)
+
+            # All the firsts from all the productions.
+            firsts = [
+                self.gen_first(rule[1], visited)
+                for rule in self.grammar
+                if rule[0] == symbol
+            ]
+
+            result = ()
+            for fs in firsts:
+                result = result + tuple(f for f in fs if f not in result)
+
+            return result
+
+    def gen_first(self, symbols, visited=None):
+        """Compute the first set for a sequence of symbols.
+
+        An epsilon in the set is indicated by 'None'.
+
+        The 'visited' parameter, if not None, is a set of symbols that are
+        already in the process of being evaluated, to deal with left-recursive
+        grammars. (See gen_first_symbol for more.)
+        """
+        if len(symbols) == 0:
+            return (None,)  # Epsilon.
+        else:
+            if visited is None:
+                visited = set()
+            result = self.gen_first_symbol(symbols[0], visited)
+            if None in result:
+                result = tuple(set(s for s in result if s is not None))
+                result = result + self.gen_first(symbols[1:])
+            return result
+
+    def gen_follow(self, symbol):
+        """Generate the follow set for the given nonterminal."""
+        if symbol == '__start':
+            return tuple('$')
+
+        assert symbol in self.nonterminals
+        follow = ()
+        for production in self.grammar:
+            for index, prod_symbol in enumerate(production[1]):
+                if prod_symbol != symbol:
+                    continue
+
+                first = self.gen_first(production[1][index+1:])
+                follow = follow + tuple(f for f in first if f is not None)
+                if None in first:
+                    follow = follow + self.gen_follow(production[0])
+
+        assert None not in follow  # Should always ground out at __start
+        return follow
 
 
 def parse(table, input, trace=False):
@@ -376,30 +489,48 @@ grammar_simple = [
     ('T', ['id']),
 ]
 
-gen = GenerateLR0(grammar_simple, 'E')
+gen = GenerateLR0('E', grammar_simple)
 table = gen.gen_table()
 tree = parse(table, ['id', '+', '(', 'id', ')'])
-print(format_node(tree))
+print(format_node(tree) + "\n")
 
 # This one doesn't work with LR0, though, it has a shift/reduce conflict.
+grammar_lr0_shift_reduce = grammar_simple + [
+    ('T', ['id', '[', 'E', ']']),
+]
 try:
-    grammar_lr0_conflict = grammar_simple + [
-        ('T', ['id', '[', 'E', ']']),
-    ]
-    gen = GenerateLR0(grammar_lr0_conflict, 'E')
+    gen = GenerateLR0('E', grammar_lr0_shift_reduce)
     table = gen.gen_table()
     assert False
 except ValueError as e:
     print(e)
 
 # Nor does this: it has a reduce/reduce conflict.
+grammar_lr0_reduce_reduce = grammar_simple + [
+    ('E', ['V', '=', 'E']),
+    ('V', ['id']),
+]
 try:
-    grammar_lr0_conflict = grammar_simple + [
-        ('E', ['V', '=', 'E']),
-        ('V', ['id']),
-    ]
-    gen = GenerateLR0(grammar_lr0_conflict, 'E')
+    gen = GenerateLR0('E', grammar_lr0_reduce_reduce)
     table = gen.gen_table()
     assert False
 except ValueError as e:
     print(e)
+
+# Nullable symbols just don't work with constructs like this, because you can't
+# look ahead to figure out if you should reduce an empty 'F' or not.
+grammar_nullable = [
+    ('E', ['F', 'boop']),
+    ('F', ['beep']),
+    ('F', []),
+]
+try:
+    gen = GenerateLR0('E', grammar_nullable)
+    table = gen.gen_table()
+    assert False
+except ValueError as e:
+    print(e)
+
+gen = GenerateSLR1('E', grammar_lr0_shift_reduce)
+print("First:  {first}".format(first=str(gen.gen_first(['E']))))
+print("Follow: {follow}".format(follow=str(gen.gen_follow('E'))))
