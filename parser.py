@@ -311,6 +311,10 @@ class GenerateSLR1(GenerateLR0):
     def gen_first_symbol(self, symbol, visited):
         """Compute the first set for a single symbol.
 
+        The first set is the set of tokens that can appear as the first token
+        for a given symbol. (Obviously, if the symbol is itself a token, then
+        this is trivial.)
+
         'visited' is a set of already visited symbols, to stop infinite
         recursion on left-recursive grammars. That means that sometimes this
         function can return an empty tuple. Don't confuse that with a tuple
@@ -341,7 +345,16 @@ class GenerateSLR1(GenerateLR0):
     def gen_first(self, symbols, visited=None):
         """Compute the first set for a sequence of symbols.
 
-        An epsilon in the set is indicated by 'None'.
+        The first set is the set of tokens that can appear as the first token
+        for this sequence of symbols. The interesting wrinkle in computing the
+        first set for a sequence of symbols is that we keep computing the first
+        sets so long as Epsilon appears in the set. i.e., if we are computing
+        for ['A', 'B', 'C'] and the first set of 'A' contains epsilon, then the
+        first set for the *sequence* also contains the first set of ['B', 'C'],
+        since 'A' could be missing entirely.
+
+        An epsilon in the result is indicated by 'None'. There will always be
+        at least one element in the result.
 
         The 'visited' parameter, if not None, is a set of symbols that are
         already in the process of being evaluated, to deal with left-recursive
@@ -355,7 +368,7 @@ class GenerateSLR1(GenerateLR0):
             result = self.gen_first_symbol(symbols[0], visited)
             if None in result:
                 result = tuple(set(s for s in result if s is not None))
-                result = result + self.gen_first(symbols[1:])
+                result = result + self.gen_first(symbols[1:], visited)
             return result
 
     def gen_follow(self, symbol):
