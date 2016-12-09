@@ -1,4 +1,30 @@
-# This is doty playing with parser tables.
+"""A collection of LR parser generators, from LR0 through LALR.
+
+One day I read a tweet, asking for a tool which accepted a grammar and an
+input file and which then produced simple parsed output, without any kind of
+in-between. (There was other ranty stuff about how none of the existing tools
+really worked, but that was beside the point.)
+
+Upon reading the tweet, it occured to me that I didn't know how LR parsers
+worked and how they were generated, except in the broadest of terms. Thus, I
+set about writing this, learning as I went.
+
+This code is not written to be fast, or even efficient, although it runs its
+test cases fast enough. It was instead written to be easy to follow along
+with, so that when I forget how all this works I can come back to the code
+and read along and learn all over again.
+
+(BTW, the notes I read to learn how all this works are at
+http://dragonbook.stanford.edu/lecture-notes/Stanford-CS143/. Specifically,
+I started with handout 8, 'Bottom-up-parsing', and went from there. (I did
+eventually have to backtrack a little into handout 7, since that's where
+First() and Follow() are covered.)
+
+Enjoy!
+
+doty
+2016-12-09
+"""
 from collections import namedtuple
 
 
@@ -10,7 +36,12 @@ from collections import namedtuple
 class Configuration(
     namedtuple('Configuration', ['name', 'symbols', 'position', 'lookahead'])
 ):
-    """A rule being tracked in a state."""
+    """A rule being tracked in a state.
+
+    (Note: technically, lookahead isn't used until we get to LR(1) parsers,
+    but if left at its default it's harmless. Ignore it until you get to
+    the part about LR(1).)
+    """
     __slots__ = ()
 
     @classmethod
@@ -55,7 +86,7 @@ class Configuration(
 class GenerateLR0(object):
     """Generate parser tables for an LR0 parser.
 
-    Grammars are of the form:
+    The input grammars are of the form:
 
       grammar_simple = [
         ('E', ['E', '+', 'T']),
@@ -69,6 +100,10 @@ class GenerateLR0(object):
     non-terminal being added, and the second elment of the tuple is the
     list of terminals and non-terminals that make up the production.
 
+    There is currently no support for custom actions or alternation or
+    anything like that. If you want alternations that you'll have to lower
+    the grammar by hand into the simpler form first.
+
     Don't name anything with double-underscores; those are reserved for
     the generator. Don't add '$' either, as it is reserved to mean
     end-of-stream. Use an empty list to indicate nullability, that is:
@@ -77,7 +112,7 @@ class GenerateLR0(object):
 
     means that O can be matched with nothing.
 
-    Implementation nodes:
+    Implementation notes:
     - This is implemented in the dumbest way possible, in order to be the
       most understandable it can be. I built this to learn, and I want to
       make sure I can keep learning with it.
@@ -585,6 +620,75 @@ class GenerateLR1(GenerateSLR1):
         return self.gen_sets(initial_set, ())
 
 
+class GenerateLALR(GenerateLR1):
+    """Generate tables for LALR.
+
+    LALR is smaller than LR(1) but bigger than SLR(1). It works by generating
+    the LR(1) configuration sets, but merging configuration sets which are
+    equal in everything but their lookaheads. This works in that it doesn't
+    generate any shift/reduce conflicts that weren't already in the LR(1)
+    grammar. It can, however, introduce new reduce/reduce conflicts, because
+    it does lose information. The advantage is that the number of parser
+    states is much much smaller in LALR than in LR(1).
+
+    (Note that because we use immutable state everywhere this generator does
+    a lot of copying and allocation.)
+    """
+    def merge_sets(self, config_set_a, config_set_b):
+        """Merge the two config sets, by keeping the item cores but merging
+        the lookahead sets for each item.
+        """
+        assert len(config_set_a) == len(config_set_b)
+        merged = []
+        for index, a in enumerate(config_set_a):
+            b = config_set_b[index]
+            assert a.replace(lookahead=()) == b.replace(lookahead=())
+
+            new_lookahead = a.lookahead + b.lookahead
+            new_lookahead = tuple(sorted(set(new_lookahead)))
+            merged.append(a.replace(lookahead=new_lookahead))
+
+        return tuple(merged)
+
+    def sets_equal(self, a, b):
+        a_no_la = tuple(s.replace(lookahead=()) for s in a)
+        b_no_la = tuple(s.replace(lookahead=()) for s in b)
+        return a_no_la == b_no_la
+
+    def gen_sets(self, config_set, F):
+        """Recursively generate all configuration sets starting from the
+        provided set, and merge them with the provided set 'F'.
+
+        The difference between this method and the one in GenerateLR0, where
+        this comes from, is in the part that stops recursion. In LALR we
+        compare for set equality *ignoring lookahead*. If we find a match,
+        then instead of returning F unchanged, we merge the two equal sets
+        and replace the set in F, returning the modified set.
+        """
+        config_set_no_la = tuple(s.replace(lookahead=()) for s in config_set)
+        for index, existing in enumerate(F):
+            existing_no_la = tuple(s.replace(lookahead=()) for s in existing)
+            if config_set_no_la == existing_no_la:
+                merged_set = self.merge_sets(config_set, existing)
+                return F[:index] + (merged_set,) + F[index+1:]
+
+        # No merge candidate found, proceed.
+        new_F = F + (config_set,)
+        for successor in self.gen_all_successors(config_set):
+            new_F = self.gen_sets(successor, new_F)
+
+        return new_F
+
+    def find_set_index(self, sets, set):
+        """Find the specified set in the set of sets, and return the
+        index, or None if it is not found.
+        """
+        for i, s in enumerate(sets):
+            if self.sets_equal(s, set):
+                return i
+        return None
+
+
 ###############################################################################
 # Formatting
 ###############################################################################
@@ -659,6 +763,7 @@ gen = GenerateLR0('E', grammar_simple)
 table = gen.gen_table()
 tree = parse(table, ['id', '+', '(', 'id', ')'])
 print(format_node(tree) + "\n")
+print()
 
 # This one doesn't work with LR0, though, it has a shift/reduce conflict.
 grammar_lr0_shift_reduce = grammar_simple + [
@@ -670,6 +775,7 @@ try:
     assert False
 except ValueError as e:
     print(e)
+print()
 
 # Nor does this: it has a reduce/reduce conflict.
 grammar_lr0_reduce_reduce = grammar_simple + [
@@ -682,6 +788,7 @@ try:
     assert False
 except ValueError as e:
     print(e)
+print()
 
 # Nullable symbols just don't work with constructs like this, because you can't
 # look ahead to figure out if you should reduce an empty 'F' or not.
@@ -704,6 +811,7 @@ table = gen.gen_table()
 print(format_table(gen, table))
 tree = parse(table, ['id', '+', '(', 'id', '[', 'id', ']', ')'])
 print(format_node(tree) + "\n")
+print()
 
 # SLR1 can't handle this.
 grammar_aho_ullman_1 = [
@@ -719,6 +827,7 @@ try:
     assert False
 except ValueError as e:
     print(e)
+print()
 
 # Here's an example with a full LR1 grammar, though.
 grammar_aho_ullman_2 = [
@@ -730,3 +839,28 @@ gen = GenerateLR1('S', grammar_aho_ullman_2)
 table = gen.gen_table()
 print(format_table(gen, table))
 parse(table, ['b', 'a', 'a', 'b'], trace=True)
+print()
+
+# What happens if we do LALR to it?
+gen = GenerateLALR('S', grammar_aho_ullman_2)
+table = gen.gen_table()
+print(format_table(gen, table))
+print()
+
+# A fun LALAR grammar.
+grammar_lalr = [
+    ('S', ['V', 'E']),
+
+    ('E', ['F']),
+    ('E', ['E', '+', 'F']),
+
+    ('F', ['V']),
+    ('F', ['int']),
+    ('F', ['(', 'E', ')']),
+
+    ('V', ['id']),
+]
+gen = GenerateLALR('S', grammar_lalr)
+table = gen.gen_table()
+print(format_table(gen, table))
+print()
