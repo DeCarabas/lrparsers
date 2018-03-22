@@ -133,13 +133,13 @@ class GenerateLR0(object):
         # rule, and in the set of states and table and whatever the first
         # element is always the starting state/position.
         self.grammar = [('__start', [start])] + grammar
-        self.nonterminals = set(rule[0] for rule in grammar)
-        self.terminals = set(
+        self.nonterminals = {rule[0] for rule in grammar}
+        self.terminals = {
             sym
             for name, symbols in grammar
             for sym in symbols
             if sym not in self.nonterminals
-        )
+        }
         self.alphabet = self.terminals | self.nonterminals
 
         # Check to make sure they didn't use anything that will give us
