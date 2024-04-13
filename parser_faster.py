@@ -423,6 +423,10 @@ class GenerateSLR1(GenerateLR0):
     means they need to know how to generate 'first(A)', which is most of the
     code in this class.
     """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._first_symbol_cache = {}
+
     def gen_first_symbol(self, symbol, visited):
         """Compute the first set for a single symbol.
 
@@ -447,6 +451,10 @@ class GenerateSLR1(GenerateLR0):
             assert symbol in self.nonterminals
             visited.add(symbol)
 
+            cached_result = self._first_symbol_cache.get(symbol, None)
+            if cached_result:
+                return cached_result
+
             # All the firsts from all the productions.
             firsts = [
                 self.gen_first(rule[1], visited)
@@ -455,7 +463,9 @@ class GenerateSLR1(GenerateLR0):
             ]
 
             result = {f for fs in firsts for f in fs}
-            return tuple(sorted(result, key=lambda x: (x is None, x)))
+            result = tuple(sorted(result, key=lambda x: (x is None, x)))
+            self._first_symbol_cache[symbol] = result
+            return result
 
     def gen_first(self, symbols, visited=None):
         """Compute the first set for a sequence of symbols.
