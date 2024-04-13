@@ -62,6 +62,74 @@ class Configuration(
             lookahead=la,
         )
 
+class TableBuilder(object):
+    def __init__(self):
+        self.errors = []
+        self.table = []
+        self.row = None
+
+    def flush(self):
+        self._flush_row()
+        if len(self.errors) > 0:
+            raise ValueError("\n\n".join(self.errors))
+        return self.table
+
+    def new_row(self, config_set):
+        self._flush_row()
+        self.row = {}
+        self.current_config_set = config_set
+
+    def _flush_row(self):
+        if self.row:
+            actions = {k: v[0] for k,v in self.row.items()}
+            self.table.append(actions)
+
+
+    def set_table_reduce(self, symbol, config):
+        action = ('reduce', config.name, len(config.symbols))
+        self._set_table_action(symbol, action, config)
+
+    def set_table_accept(self, config):
+        action = ('accept',)
+        self._set_table_action('$', action, config)
+
+    def set_table_shift(self, index, config):
+        action = ('shift', index)
+        self._set_table_action(config.next, action, config)
+
+    def set_table_goto(self, symbol, index):
+        action = ('goto', index)
+        self._set_table_action(symbol, action, None)
+
+    def _set_table_action(self, symbol, action, config):
+        """Set the action for 'symbol' in the table row to 'action'.
+
+        This is destructive; it changes the table. It raises an error if
+        there is already an action for the symbol in the row.
+        """
+        existing, existing_config = self.row.get(symbol, (None, None))
+        if existing is not None and existing != action:
+            config_old = str(existing_config)
+            config_new = str(config)
+            max_len = max(len(config_old), len(config_new)) + 1
+            error = (
+                "Conflicting actions for token '{symbol}':\n"
+                "  {config_old: <{max_len}}: {old}\n"
+                "  {config_new: <{max_len}}: {new}\n".format(
+                    config_old=config_old,
+                    config_new=config_new,
+                    max_len=max_len,
+                    old=existing,
+                    new=action,
+                    symbol=symbol,
+                )
+            )
+            self.errors.append(error)
+        self.row[symbol] = (action, config)
+
+    def get_table_action(self, symbol):
+        return self.row[symbol][0]
+
 
 class GenerateLR0(object):
     """Generate parser tables for an LR0 parser.
@@ -281,68 +349,36 @@ class GenerateLR0(object):
 
         Anything missing from the row indicates an error.
         """
-        errors = []
-        action_table = []
+        builder = TableBuilder()
+
         config_sets = self.gen_all_sets()
         for config_set in config_sets:
-            actions = {}
+            builder.new_row(config_set)
 
             # Actions
             for config in config_set:
                 if config.at_end:
                     if config.name != '__start':
                         for a in self.gen_reduce_set(config):
-                            self.set_table_action(
-                                errors,
-                                actions,
-                                a,
-                                ('reduce', config.name, len(config.symbols)),
-                                config,
-                            )
+                            builder.set_table_reduce(a, config)
                     else:
-                        self.set_table_action(
-                            errors,
-                            actions,
-                            '$',
-                            ('accept',),
-                            config,
-                        )
+                        builder.set_table_accept(config)
 
                 else:
                     if config.next in self.terminals:
                         successor = self.gen_successor(config_set, config.next)
                         index = self.find_set_index(config_sets, successor)
-                        self.set_table_action(
-                            errors,
-                            actions,
-                            config.next,
-                            ('shift', index),
-                            config,
-                        )
+                        builder.set_table_shift(index, config)
 
             # Gotos
             for symbol in self.nonterminals:
                 successor = self.gen_successor(config_set, symbol)
                 index = self.find_set_index(config_sets, successor)
                 if index is not None:
-                    self.set_table_action(
-                        errors,
-                        actions,
-                        symbol,
-                        ('goto', index),
-                        None,
-                    )
+                    builder.set_table_goto(symbol, index)
 
-            # set_table_action stores the configs that generated the actions in
-            # the table, for diagnostic purposes. This filters them out again
-            # so that the parser has something clean to work with.
-            actions = {k: self.get_table_action(actions, k) for k in actions}
-            action_table.append(actions)
 
-        if len(errors) > 0:
-            raise ValueError("\n\n".join(errors))
-
-        return action_table
+        return builder.flush()
 
     def set_table_action(self, errors, row, symbol, action, config):
         """Set the action for 'symbol' in the table row to 'action'.
