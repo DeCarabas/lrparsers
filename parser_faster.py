@@ -206,24 +206,25 @@ class GenerateLR0(object):
 
         return tuple(next)
 
-    def gen_sets_recursive(self, config_set, F):
-        """Recursively generate all configuration sets starting from the
-        provided set, and merge them with the provided set 'F'.
-        """
-        if config_set in F:
-            return F
-        else:
-            new_F = F + (config_set,)
-            for successor in self.gen_all_successors(config_set):
-                new_F = self.gen_sets_recursive(successor, new_F)
-
-            return new_F
-
     def gen_sets(self, config_set):
         """Recursively generate all configuration sets starting from the
         provided set, and merge them with the provided set 'F'.
         """
-        return self.gen_sets_recursive(config_set, ())
+        # NOTE: Not a set because we need to maintain insertion order!
+        #       The first element in the dictionary needs to be the intial
+        #       set.
+        F = {}
+        pending = [config_set]
+        while len(pending) > 0:
+            config_set = pending.pop()
+            if config_set in F:
+                continue
+
+            F[config_set] = len(F)
+            for successor in self.gen_all_successors(config_set):
+                pending.append(successor)
+
+        return tuple(F.keys())
 
 
     def gen_all_sets(self):
@@ -653,7 +654,7 @@ class GenerateLALR(GenerateLR1):
         b_no_la = tuple(s.replace(lookahead=()) for s in b)
         return a_no_la == b_no_la
 
-    def gen_sets_recursive(self, config_set, F):
+    def gen_sets(self, config_set):
         """Recursively generate all configuration sets starting from the
         provided set, and merge them with the provided set 'F'.
 
@@ -663,19 +664,23 @@ class GenerateLALR(GenerateLR1):
         then instead of returning F unchanged, we merge the two equal sets
         and replace the set in F, returning the modified set.
         """
-        config_set_no_la = tuple(s.replace(lookahead=()) for s in config_set)
-        for index, existing in enumerate(F):
-            existing_no_la = tuple(s.replace(lookahead=()) for s in existing)
-            if config_set_no_la == existing_no_la:
-                merged_set = self.merge_sets(config_set, existing)
-                return F[:index] + (merged_set,) + F[index+1:]
+        F = {}
+        pending = [config_set]
+        while len(pending) > 0:
+            config_set = pending.pop()
+            config_set_no_la = tuple(s.replace(lookahead=()) for s in config_set)
 
-        # No merge candidate found, proceed.
-        new_F = F + (config_set,)
-        for successor in self.gen_all_successors(config_set):
-            new_F = self.gen_sets_recursive(successor, new_F)
+            existing = F.get(config_set_no_la)
+            if existing is not None:
+                F[config_set_no_la] = self.merge_sets(config_set, existing)
+            else:
+                F[config_set_no_la] = config_set
+                for successor in self.gen_all_successors(config_set):
+                    pending.append(successor)
 
-        return new_F
+        # NOTE: We count on insertion order here! The first element must be the
+        #       starting state!
+        return tuple(F.values())
 
     def find_set_index(self, sets, set):
         """Find the specified set in the set of sets, and return the
