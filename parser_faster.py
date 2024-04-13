@@ -455,7 +455,7 @@ class GenerateSLR1(GenerateLR0):
             ]
 
             result = {f for fs in firsts for f in fs}
-            return tuple(sorted(result))
+            return tuple(sorted(result, key=lambda x: (x is None, x)))
 
     def gen_first(self, symbols, visited=None):
         """Compute the first set for a sequence of symbols.
@@ -484,7 +484,7 @@ class GenerateSLR1(GenerateLR0):
             if None in result:
                 result = tuple(s for s in result if s is not None)
                 result = result + self.gen_first(symbols[1:], visited)
-                result = tuple(sorted(set(result)))
+                result = tuple(sorted(set(result), key=lambda x: (x is None, x)))
             return result
 
     def gen_follow(self, symbol, visited=None):
