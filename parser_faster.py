@@ -164,6 +164,7 @@ class GenerateLR0(object):
                 if rule[0] == config.next
             )
 
+    @functools.cache
     def gen_closure(self, seeds):
         """Compute the closure for the specified configs. We have replaced a
         recursive version with an iterative one."""
@@ -180,6 +181,7 @@ class GenerateLR0(object):
 
         return tuple(closure) # TODO: Why tuple?
 
+    @functools.cache
     def gen_successor(self, config_set, symbol):
         """Compute the successor state for the given config set and the
         given symbol.
@@ -219,6 +221,7 @@ class GenerateLR0(object):
             config_set = pending.pop()
             if config_set in F:
                 continue
+            # print(f"pending: {len(pending)}  F: {len(F)}")
 
             F[config_set] = len(F)
             for successor in self.gen_all_successors(config_set):
@@ -278,6 +281,7 @@ class GenerateLR0(object):
 
         Anything missing from the row indicates an error.
         """
+        errors = []
         action_table = []
         config_sets = self.gen_all_sets()
         for config_set in config_sets:
@@ -289,6 +293,7 @@ class GenerateLR0(object):
                     if config.name != '__start':
                         for a in self.gen_reduce_set(config):
                             self.set_table_action(
+                                errors,
                                 actions,
                                 a,
                                 ('reduce', config.name, len(config.symbols)),
@@ -296,6 +301,7 @@ class GenerateLR0(object):
                             )
                     else:
                         self.set_table_action(
+                            errors,
                             actions,
                             '$',
                             ('accept',),
@@ -307,6 +313,7 @@ class GenerateLR0(object):
                         successor = self.gen_successor(config_set, config.next)
                         index = self.find_set_index(config_sets, successor)
                         self.set_table_action(
+                            errors,
                             actions,
                             config.next,
                             ('shift', index),
@@ -319,6 +326,7 @@ class GenerateLR0(object):
                 index = self.find_set_index(config_sets, successor)
                 if index is not None:
                     self.set_table_action(
+                        errors,
                         actions,
                         symbol,
                         ('goto', index),
@@ -331,9 +339,12 @@ class GenerateLR0(object):
             actions = {k: self.get_table_action(actions, k) for k in actions}
             action_table.append(actions)
 
+        if len(errors) > 0:
+            raise ValueError("\n\n".join(errors))
+
         return action_table
 
-    def set_table_action(self, row, symbol, action, config):
+    def set_table_action(self, errors, row, symbol, action, config):
         """Set the action for 'symbol' in the table row to 'action'.
 
         This is destructive; it changes the table. It raises an error if
@@ -356,7 +367,7 @@ class GenerateLR0(object):
                     symbol=symbol,
                 )
             )
-            raise ValueError(error)
+            errors.append(error)
         row[symbol] = (action, config)
 
     def get_table_action(self, row, symbol):
