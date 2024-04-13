@@ -144,6 +144,7 @@ class GenerateLR0(object):
         self.terminals.add('$')
         self.alphabet.add('$')
 
+    @functools.cache
     def gen_closure_next(self, config):
         """Return the next set of configurations in the closure for
         config.
@@ -186,11 +187,11 @@ class GenerateLR0(object):
         The successor represents the next state of the parser after seeing
         the symbol.
         """
-        seeds = [
+        seeds = tuple(
             config.replace(position=config.position + 1)
             for config in config_set
             if config.at_symbol(symbol)
-        ]
+        )
 
         closure = self.gen_closure(seeds)
         return closure
@@ -221,7 +222,7 @@ class GenerateLR0(object):
     def gen_all_sets(self):
         """Generate all of the configuration sets for the grammar."""
         initial_set = self.gen_closure(
-            [ Configuration.from_rule(self.grammar[0]) ]
+            ( Configuration.from_rule(self.grammar[0]), )
         )
         return self.gen_sets(initial_set, ())
 
@@ -605,7 +606,7 @@ class GenerateLR1(GenerateSLR1):
         symbol to '$'.
         """
         initial_set = self.gen_closure(
-            [ Configuration.from_rule(self.grammar[0], lookahead=('$',)) ],
+            ( Configuration.from_rule(self.grammar[0], lookahead=('$',)), ),
         )
         return self.gen_sets(initial_set, ())
 
