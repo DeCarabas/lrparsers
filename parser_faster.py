@@ -206,7 +206,7 @@ class GenerateLR0(object):
 
         return tuple(next)
 
-    def gen_sets(self, config_set, F):
+    def gen_sets_recursive(self, config_set, F):
         """Recursively generate all configuration sets starting from the
         provided set, and merge them with the provided set 'F'.
         """
@@ -215,16 +215,23 @@ class GenerateLR0(object):
         else:
             new_F = F + (config_set,)
             for successor in self.gen_all_successors(config_set):
-                new_F = self.gen_sets(successor, new_F)
+                new_F = self.gen_sets_recursive(successor, new_F)
 
             return new_F
+
+    def gen_sets(self, config_set):
+        """Recursively generate all configuration sets starting from the
+        provided set, and merge them with the provided set 'F'.
+        """
+        return self.gen_sets_recursive(config_set, ())
+
 
     def gen_all_sets(self):
         """Generate all of the configuration sets for the grammar."""
         initial_set = self.gen_closure(
             ( Configuration.from_rule(self.grammar[0]), )
         )
-        return self.gen_sets(initial_set, ())
+        return self.gen_sets(initial_set)
 
     def find_set_index(self, sets, set):
         """Find the specified set in the set of sets, and return the
@@ -608,7 +615,7 @@ class GenerateLR1(GenerateSLR1):
         initial_set = self.gen_closure(
             ( Configuration.from_rule(self.grammar[0], lookahead=('$',)), ),
         )
-        return self.gen_sets(initial_set, ())
+        return self.gen_sets(initial_set)
 
 
 class GenerateLALR(GenerateLR1):
@@ -646,7 +653,7 @@ class GenerateLALR(GenerateLR1):
         b_no_la = tuple(s.replace(lookahead=()) for s in b)
         return a_no_la == b_no_la
 
-    def gen_sets(self, config_set, F):
+    def gen_sets_recursive(self, config_set, F):
         """Recursively generate all configuration sets starting from the
         provided set, and merge them with the provided set 'F'.
 
@@ -666,7 +673,7 @@ class GenerateLALR(GenerateLR1):
         # No merge candidate found, proceed.
         new_F = F + (config_set,)
         for successor in self.gen_all_successors(config_set):
-            new_F = self.gen_sets(successor, new_F)
+            new_F = self.gen_sets_recursive(successor, new_F)
 
         return new_F
 
