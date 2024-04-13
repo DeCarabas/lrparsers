@@ -5,8 +5,8 @@ This version has some performance work done.
 
 2023
 """
+import functools
 from collections import namedtuple
-
 
 ###############################################################################
 # LR0
@@ -113,6 +113,14 @@ class GenerateLR0(object):
         # rule, and in the set of states and table and whatever the first
         # element is always the starting state/position.
         self.grammar = [('__start', [start])] + grammar
+
+        # Convert the grammar into fully immutable tuples so we can hash
+        # everything.
+        self.grammar = tuple(
+            (name, tuple(symbols))
+            for name, symbols in self.grammar
+        )
+
         self.nonterminals = {rule[0] for rule in grammar}
         self.terminals = {
             sym
@@ -155,21 +163,21 @@ class GenerateLR0(object):
                 if rule[0] == config.next
             )
 
-    def gen_closure(self, config, closure):
-        """Compute the closure for the specified config and unify it with the
-        existing closure.
+    def gen_closure(self, seeds):
+        """Compute the closure for the specified configs. We have replaced a
+        recursive version with an iterative one."""
+        closure = set()
+        pending = list(seeds)
+        while len(pending) > 0:
+            config = pending.pop()
+            if config in closure:
+                continue
 
-        If the provided config is already in the closure then nothing is
-        done. (We assume that the closure of the config is *also* already in
-        the closure.)
-        """
-        if config in closure:
-            return closure
-        else:
-            new_closure = tuple(closure) + (config,)
+            closure.add(config)
             for next_config in self.gen_closure_next(config):
-                new_closure = self.gen_closure(next_config, new_closure)
-            return new_closure
+                pending.append(next_config)
+
+        return tuple(closure) # TODO: Why tuple?
 
     def gen_successor(self, config_set, symbol):
         """Compute the successor state for the given config set and the
@@ -184,10 +192,7 @@ class GenerateLR0(object):
             if config.at_symbol(symbol)
         ]
 
-        closure = ()
-        for seed in seeds:
-            closure = self.gen_closure(seed, closure)
-
+        closure = self.gen_closure(seeds)
         return closure
 
     def gen_all_successors(self, config_set):
@@ -216,8 +221,7 @@ class GenerateLR0(object):
     def gen_all_sets(self):
         """Generate all of the configuration sets for the grammar."""
         initial_set = self.gen_closure(
-            Configuration.from_rule(self.grammar[0]),
-            (),
+            [ Configuration.from_rule(self.grammar[0]) ]
         )
         return self.gen_sets(initial_set, ())
 
@@ -601,8 +605,7 @@ class GenerateLR1(GenerateSLR1):
         symbol to '$'.
         """
         initial_set = self.gen_closure(
-            Configuration.from_rule(self.grammar[0], lookahead=('$',)),
-            (),
+            [ Configuration.from_rule(self.grammar[0], lookahead=('$',)) ],
         )
         return self.gen_sets(initial_set, ())
 
@@ -750,6 +753,7 @@ def examples():
 
     gen = GenerateLR0('E', grammar_simple)
     table = gen.gen_table()
+    print(format_table(gen, table))
     tree = parse(table, ['id', '+', '(', 'id', ')'])
     print(format_node(tree) + "\n")
     print()
