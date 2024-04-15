@@ -122,9 +122,6 @@ class Configuration:
     def rest(self):
         return self.symbols[(self.position+1):]
 
-    def at_symbol(self, symbol):
-        return self.next == symbol
-
     def __str__(self):
         la = ", " + str(self.lookahead) if self.lookahead != () else ""
         return "{name} -> {bits}{lookahead}".format(
@@ -351,7 +348,7 @@ class GenerateLR0(object):
         seeds = tuple(
             config.replace_position(config.position + 1)
             for config in config_set
-            if config.at_symbol(symbol)
+            if config.next == symbol
         )
 
         closure = self.gen_closure(seeds)
@@ -359,8 +356,14 @@ class GenerateLR0(object):
 
     def gen_all_successors(self, config_set: typing.Iterable[Configuration]) -> list[ConfigSet]:
         """Return all of the non-empty successors for the given config set."""
+        possible = tuple(sorted({
+            config.next
+            for config in config_set
+            if config.next is not None
+        }))
+
         next = []
-        for symbol in self.alphabet:
+        for symbol in possible:
             successor = self.gen_successor(config_set, symbol)
             if len(successor) > 0:
                 next.append(successor)
