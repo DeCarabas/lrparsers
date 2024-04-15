@@ -15,7 +15,6 @@ import typing
 #
 # We start with LR0 parsers, because they form the basis of everything else.
 ###############################################################################
-@dataclasses.dataclass(frozen=True, order=True)
 class Configuration:
     """A rule being tracked in a state.
 
@@ -23,10 +22,39 @@ class Configuration:
     but if left at its default it's harmless. Ignore it until you get to
     the part about LR(1).)
     """
+    __slots__ = (
+        'name',
+        'symbols',
+        'position',
+        'lookahead',
+        'next',
+        'at_end',
+        '_vals',
+        '_hash',
+    )
+
     name: str
     symbols: typing.Tuple[str, ...]
     position: int
     lookahead: typing.Tuple[str, ...]
+    next: str | None
+    at_end: bool
+
+    _vals: typing.Tuple
+    _hash: int
+
+    def __init__(self, name, symbols, position, lookahead) -> None:
+        self.name = name
+        self.symbols = symbols
+        self.position = position
+        self.lookahead = lookahead
+
+        at_end = position == len(symbols)
+        self.at_end = at_end
+        self.next = symbols[position] if not at_end else None
+
+        self._vals = (name, symbols, position, lookahead)
+        self._hash = hash(self._vals)
 
     @classmethod
     def from_rule(cls, name: str, symbols: typing.Tuple[str, ...], lookahead=()):
@@ -37,13 +65,58 @@ class Configuration:
             lookahead=lookahead,
         )
 
-    @property
-    def at_end(self):
-        return self.position == len(self.symbols)
+    def __hash__(self) -> int:
+        return self._hash
 
-    @property
-    def next(self):
-        return self.symbols[self.position] if not self.at_end else None
+    def __eq__(self, value: object, /) -> bool:
+        if value is self:
+            return True
+        if not isinstance(value, Configuration):
+            return NotImplemented
+
+        return (
+            value._hash == self._hash and
+            value.name == self.name and
+            value.position == self.position and
+            value.symbols == self.symbols and
+            value.lookahead == self.lookahead
+        )
+
+    def __lt__(self, value) -> bool:
+        if not isinstance(value, Configuration):
+            return NotImplemented
+        return self._vals < value._vals
+
+    def __gt__(self, value) -> bool:
+        if not isinstance(value, Configuration):
+            return NotImplemented
+        return self._vals > value._vals
+
+    def __le__(self, value) -> bool:
+        if not isinstance(value, Configuration):
+            return NotImplemented
+        return self._vals <= value._vals
+
+    def __ge__(self, value) -> bool:
+        if not isinstance(value, Configuration):
+            return NotImplemented
+        return self._vals >= value._vals
+
+    def replace_position(self, new_position):
+        return Configuration(
+            name=self.name,
+            symbols=self.symbols,
+            position=new_position,
+            lookahead=self.lookahead,
+        )
+
+    def clear_lookahead(self):
+        return Configuration(
+            name=self.name,
+            symbols=self.symbols,
+            position=self.position,
+            lookahead=(),
+        )
 
     @property
     def rest(self):
@@ -51,9 +124,6 @@ class Configuration:
 
     def at_symbol(self, symbol):
         return self.next == symbol
-
-    def replace(self, **kwargs):
-        return dataclasses.replace(self, **kwargs)
 
     def __str__(self):
         la = ", " + str(self.lookahead) if self.lookahead != () else ""
@@ -279,7 +349,7 @@ class GenerateLR0(object):
         the symbol.
         """
         seeds = tuple(
-            config.replace(position=config.position + 1)
+            config.replace_position(config.position + 1)
             for config in config_set
             if config.at_symbol(symbol)
         )
@@ -745,17 +815,17 @@ class GenerateLALR(GenerateLR1):
         merged = []
         for index, a in enumerate(config_set_a):
             b = config_set_b[index]
-            assert a.replace(lookahead=()) == b.replace(lookahead=())
+            assert a.clear_lookahead() == b.clear_lookahead()
 
             new_lookahead = a.lookahead + b.lookahead
             new_lookahead = tuple(sorted(set(new_lookahead)))
-            merged.append(a.replace(lookahead=new_lookahead))
+            merged.append(a.clear_lookahead())
 
         return tuple(merged)
 
     def sets_equal(self, a, b):
-        a_no_la = tuple(s.replace(lookahead=()) for s in a)
-        b_no_la = tuple(s.replace(lookahead=()) for s in b)
+        a_no_la = tuple(s.clear_lookahead() for s in a)
+        b_no_la = tuple(s.clear_lookahead() for s in b)
         return a_no_la == b_no_la
 
     def gen_sets(self, config_set):
@@ -772,7 +842,7 @@ class GenerateLALR(GenerateLR1):
         pending = [config_set]
         while len(pending) > 0:
             config_set = pending.pop()
-            config_set_no_la = tuple(s.replace(lookahead=()) for s in config_set)
+            config_set_no_la = tuple(s.clear_lookahead() for s in config_set)
 
             existing = F.get(config_set_no_la)
             if existing is not None:
@@ -786,10 +856,13 @@ class GenerateLALR(GenerateLR1):
         #       starting state!
         return tuple(F.values())
 
+    def set_without_lookahead(self, config_set: ConfigSet) -> ConfigSet:
+        return tuple(sorted(set(c.clear_lookahead() for c in  config_set)))
+
     def build_set_index(self, sets: typing.Tuple[ConfigSet, ...]) -> dict[ConfigSet, int]:
         index = {}
         for s in sets:
-            s_no_la = tuple(c.replace(lookahead=()) for c in s)
+            s_no_la = self.set_without_lookahead(s)
             if s_no_la not in index:
                 index[s_no_la] = len(index)
         return index
@@ -798,7 +871,7 @@ class GenerateLALR(GenerateLR1):
         """Find the specified set in the set of sets, and return the
         index, or None if it is not found.
         """
-        s_no_la = tuple(c.replace(lookahead=()) for c in s)
+        s_no_la = self.set_without_lookahead(s)
         return sets.get(s_no_la)
 
 
