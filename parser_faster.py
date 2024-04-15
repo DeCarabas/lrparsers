@@ -489,6 +489,118 @@ def parse(table, input, trace=False):
 ###############################################################################
 # SLR(1)
 ###############################################################################
+def add_changed(items: set, item)->bool:
+    old_len = len(items)
+    items.add(item)
+    return old_len != len(items)
+
+def update_changed(items: set, other: set) -> bool:
+    old_len = len(items)
+    items.update(other)
+    return old_len != len(items)
+
+@dataclasses.dataclass(frozen=True)
+class FirstInfo:
+    firsts: dict[str, set[str]]
+    is_epsilon: set[str]
+
+    @classmethod
+    def from_grammar(
+        cls,
+        grammar: dict[str, list[typing.Tuple[str,...]]],
+        terminals: set[str],
+    ):
+        firsts = {name: set() for name in grammar.keys()}
+        for t in terminals:
+            firsts[t] = {t}
+
+        epsilons = set()
+        changed = True
+        while changed:
+            changed = False
+            for name, rules in grammar.items():
+                f = firsts[name]
+                for rule in rules:
+                    if len(rule) == 0:
+                        changed = add_changed(epsilons, name) or changed
+                        continue
+
+                    for index, symbol in enumerate(rule):
+                        if symbol in terminals:
+                            changed = add_changed(f, symbol) or changed
+                        else:
+                            other_firsts = firsts[symbol]
+                            changed = update_changed(f, other_firsts) or changed
+
+                            is_last = index == len(rule) - 1
+                            if is_last and symbol in epsilons:
+                                # If this is the last symbol and the last
+                                # symbol can be empty then I can be empty
+                                # too! :P
+                                changed = add_changed(epsilons, name) or changed
+
+                            if symbol not in epsilons:
+                                # If we believe that there is at least one
+                                # terminal in the first set of this
+                                # nonterminal then I don't have to keep
+                                # looping through the symbols in this rule.
+                                break
+
+        return FirstInfo(firsts=firsts, is_epsilon=epsilons)
+
+@dataclasses.dataclass(frozen=True)
+class FollowInfo:
+    follows: dict[str, set[str]]
+
+    @classmethod
+    def from_grammar(
+        cls,
+        grammar: dict[str, list[typing.Tuple[str,...]]],
+        firsts: FirstInfo,
+    ):
+        follows = {name: set() for name in grammar.keys()}
+        follows["__start"].add('$')
+
+        changed = True
+        while changed:
+            changed = False
+            for name, rules in grammar.items():
+                for rule in rules:
+                    epsilon = True
+                    prev_symbol = None
+                    for symbol in reversed(rule):
+                        f = follows.get(symbol)
+                        if f is None:
+                            # This particular rule can't produce epsilon.
+                            epsilon = False
+                            prev_symbol = symbol
+                            continue
+
+                        # While epsilon is still set, update the follow of
+                        # this nonterminal with the follow of the production
+                        # we're processing. (This also means that the follow
+                        # of the last symbol in the production is the follow
+                        # of the entire production, as it should be.)
+                        if epsilon:
+                            changed = update_changed(f, follows[name]) or changed
+
+                        # If we're not at the end of the list then the follow
+                        # of the current symbol contains the first of the
+                        # next symbol.
+                        if prev_symbol is not None:
+                            changed = update_changed(f, firsts.firsts[prev_symbol]) or changed
+
+                        # Now if there's no epsilon in this symbol there's no
+                        # more epsilon in the rest of the sequence.
+                        if symbol not in firsts.is_epsilon:
+                            epsilon = False
+
+                        prev_symbol = symbol
+
+        return FollowInfo(follows=follows)
+
+
+
 class GenerateSLR1(GenerateLR0):
     """Generate parse tables for SLR1 grammars.
 
@@ -502,85 +614,32 @@ class GenerateSLR1(GenerateLR0):
     means they need to know how to generate 'first(A)', which is most of the
     code in this class.
     """
-    _first_symbol_cache: dict[str, typing.Tuple[str|None, ...]]
+    _firsts: FirstInfo
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._first_symbol_cache = {}
+        self._firsts = FirstInfo.from_grammar(self.grammar, self.terminals)
+        self._follows = FollowInfo.from_grammar(self.grammar, self._firsts)
 
-    def gen_first_symbol(self, symbol: str, visited: set[str]) -> typing.Tuple[str|None, ...]:
-        """Compute the first set for a single symbol.
+    def gen_first(self, symbols: typing.Iterable[str]) -> typing.Tuple[set[str], bool]:
+        """Return the first set for a sequence of symbols.
 
-        If a symbol can be empty, then the set contains epsilon, which we
-        represent as python's `None`.
+        Build the set by combining the first sets of the symbols from left to
+        right as long as epsilon remains in the first set. If we reach the end
+        and every symbol has had epsilon, then this set also has epsilon.
 
-        The first set is the set of tokens that can appear as the first token
-        for a given symbol. (Obviously, if the symbol is itself a token, then
-        this is trivial.)
-
-        'visited' is a set of already visited symbols, to stop infinite
-        recursion on left-recursive grammars. That means that sometimes this
-        function can return an empty tuple. Don't confuse that with a tuple
-        containing epsilon: that's a tuple containing `None`, not an empty
-        tuple.
+        Otherwise we can stop as soon as we get to a non-epsilon first(), and
+        our result does not have epsilon.
         """
-        if symbol in self.terminals:
-            return (symbol,)
-        elif symbol in visited:
-            return ()
-        else:
-            assert symbol in self.nonterminals
-            visited.add(symbol)
+        result = set()
+        for s in symbols:
+            result.update(self._firsts.firsts[s])
+            if s not in self._firsts.is_epsilon:
+                return (result, False)
 
-            cached_result = self._first_symbol_cache.get(symbol, None)
-            if cached_result:
-                return cached_result
+        return (result, True)
 
-            # All the firsts from all the productions.
-            firsts = [
-                self.gen_first(rule, visited)
-                for rule in self.grammar.get(symbol, ())
-            ]
-
-            result = {f for fs in firsts for f in fs}
-            result = tuple(sorted(result, key=lambda x: (x is None, x)))
-            self._first_symbol_cache[symbol] = result
-            return result
-
-    # TODO: Cache
-    # TODO: Use sets man
-    # TODO: Iterative not recursive
-    def gen_first(self, symbols: typing.Tuple[str, ...], visited=None) -> typing.Tuple[str|None, ...]:
-        """Compute the first set for a sequence of symbols.
-
-        The first set is the set of tokens that can appear as the first token
-        for this sequence of symbols. The interesting wrinkle in computing the
-        first set for a sequence of symbols is that we keep computing the first
-        sets so long as epsilon appears in the set. i.e., if we are computing
-        for ['A', 'B', 'C'] and the first set of 'A' contains epsilon, then the
-        first set for the *sequence* also contains the first set of ['B', 'C'],
-        since 'A' could be missing entirely.
-
-        An epsilon in the result is indicated by 'None'. There will always be
-        at least one element in the result.
-
-        The 'visited' parameter, if not None, is a set of symbols that are
-        already in the process of being evaluated, to deal with left-recursive
-        grammars. (See gen_first_symbol for more.)
-        """
-        if len(symbols) == 0:
-            return (None,)  # Epsilon.
-        else:
-            if visited is None:
-                visited = set()
-            result = self.gen_first_symbol(symbols[0], visited)
-            if None in result:
-                result = tuple(s for s in result if s is not None)
-                result = result + self.gen_first(symbols[1:], visited)
-                result = tuple(sorted(set(result), key=lambda x: (x is None, x)))
-            return result
-
-    def gen_follow(self, symbol: str, visited=None):
+    def gen_follow(self, symbol: str) -> set[str]:
         """Generate the follow set for the given nonterminal.
 
         The follow set for a nonterminal is the set of terminals that can
@@ -588,32 +647,8 @@ class GenerateSLR1(GenerateLR0):
         contains epsilon and is never empty, since we should always at least
         ground out at '$', which is the end-of-stream marker.
         """
-        if symbol == '__start':
-            return tuple('$')
-
-        assert symbol in self.nonterminals
-
-        # Deal with left-recursion.
-        if visited is None:
-            visited = set()
-        if symbol in visited:
-            return ()
-        visited.add(symbol)
-
-        follow = ()
-        for name, rule_set in self.grammar.items():
-            for production in rule_set:
-                for index, prod_symbol in enumerate(production):
-                    if prod_symbol != symbol:
-                        continue
-
-                    first = self.gen_first(production[index+1:])
-                    follow = follow + tuple(f for f in first if f is not None)
-                    if None in first:
-                        follow = follow + self.gen_follow(name, visited)
-
-        assert None not in follow  # Should always ground out at __start
-        return follow
+        assert symbol in self.grammar
+        return self._follows.follows[symbol]
 
     def gen_reduce_set(self, config: Configuration) -> typing.Iterable[str]:
         """Return the set of symbols that indicate we should reduce the given
@@ -663,16 +698,10 @@ class GenerateLR1(GenerateSLR1):
         else:
             next = []
             for rule in self.grammar.get(config_next, ()):
-                # N.B.: We can't just append config.lookahead to config.rest
-                #       and compute first(), because lookahead is a *set*. So
-                #       in this case we just say if 'first' contains epsilon,
-                #       then we need to remove the epsilon and union with the
-                #       existing lookahead.
-                lookahead = self.gen_first(config.rest)
-                if None in lookahead:
-                    lookahead = tuple(l for l in lookahead if l is not None)
-                    lookahead = lookahead + config.lookahead
-                    lookahead = tuple(sorted(set(lookahead)))
+                lookahead, epsilon = self.gen_first(config.rest)
+                if epsilon:
+                    lookahead.update(config.lookahead)
+                lookahead = tuple(sorted(lookahead))
                 next.append(Configuration.from_rule(config_next, rule, lookahead=lookahead))
 
             return tuple(next)
@@ -887,8 +916,9 @@ def examples():
 
     print("grammar_lr0_shift_reduce (SLR1):")
     gen = GenerateSLR1('E', grammar_lr0_shift_reduce)
-    print("First:  {first}".format(first=str(gen.gen_first(('E',)))))
-    print("Follow: {follow}".format(follow=str(gen.gen_follow('E'))))
+    first, epsilon=gen.gen_first(('E',))
+    print(f"First: {str(first)} (epsilon={epsilon})")
+    print(f"Follow: {str(gen.gen_follow('E'))}")
     table = gen.gen_table()
     print(format_table(gen, table))
     tree = parse(table, ['id', '+', '(', 'id', '[', 'id', ']', ')'], trace=True)
