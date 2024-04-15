@@ -15,7 +15,7 @@ import typing
 #
 # We start with LR0 parsers, because they form the basis of everything else.
 ###############################################################################
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, order=True)
 class Configuration:
     """A rule being tracked in a state.
 
@@ -268,7 +268,7 @@ class GenerateLR0(object):
             for next_config in self.gen_closure_next(config):
                 pending.append(next_config)
 
-        return tuple(closure) # TODO: Why tuple?
+        return tuple(sorted(closure)) # TODO: Why tuple?
 
     @functools.cache
     def gen_successor(self, config_set: typing.Iterable[Configuration], symbol: str) -> ConfigSet:
@@ -326,14 +326,14 @@ class GenerateLR0(object):
         initial_set = self.gen_closure(seeds)
         return self.gen_sets(initial_set)
 
-    def find_set_index(self, sets, set):
+    def build_set_index(self, sets: typing.Tuple[ConfigSet, ...]) -> dict[ConfigSet, int]:
+        return { s: index for index, s in enumerate(sets) }
+
+    def find_set_index(self, sets: dict[ConfigSet, int], s: ConfigSet) -> int | None:
         """Find the specified set in the set of sets, and return the
         index, or None if it is not found.
         """
-        for i, s in enumerate(sets):
-            if s == set:
-                return i
-        return None
+        return sets.get(s)
 
     def gen_reduce_set(self, config: Configuration) -> typing.Iterable[str]:
         """Return the set of symbols that indicate we should reduce the given
@@ -374,6 +374,8 @@ class GenerateLR0(object):
         builder = TableBuilder()
 
         config_sets = self.gen_all_sets()
+        set_index = self.build_set_index(config_sets)
+
         for config_set in config_sets:
             builder.new_row(config_set)
 
@@ -389,13 +391,14 @@ class GenerateLR0(object):
                 else:
                     if config.next in self.terminals:
                         successor = self.gen_successor(config_set, config.next)
-                        index = self.find_set_index(config_sets, successor)
+                        index = self.find_set_index(set_index, successor)
+                        assert index is not None
                         builder.set_table_shift(index, config)
 
             # Gotos
             for symbol in self.nonterminals:
                 successor = self.gen_successor(config_set, symbol)
-                index = self.find_set_index(config_sets, successor)
+                index = self.find_set_index(set_index, successor)
                 if index is not None:
                     builder.set_table_goto(symbol, index)
 
@@ -783,14 +786,20 @@ class GenerateLALR(GenerateLR1):
         #       starting state!
         return tuple(F.values())
 
-    def find_set_index(self, sets, set):
+    def build_set_index(self, sets: typing.Tuple[ConfigSet, ...]) -> dict[ConfigSet, int]:
+        index = {}
+        for s in sets:
+            s_no_la = tuple(c.replace(lookahead=()) for c in s)
+            if s_no_la not in index:
+                index[s_no_la] = len(index)
+        return index
+
+    def find_set_index(self, sets: dict[ConfigSet, int], s: ConfigSet) -> int | None:
         """Find the specified set in the set of sets, and return the
         index, or None if it is not found.
         """
-        for i, s in enumerate(sets):
-            if self.sets_equal(s, set):
-                return i
-        return None
+        s_no_la = tuple(c.replace(lookahead=()) for c in s)
+        return sets.get(s_no_la)
 
 
 ###############################################################################
