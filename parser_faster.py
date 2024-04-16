@@ -209,6 +209,30 @@ class TableBuilder(object):
         self.row[symbol_id] = (action, config)
 
 
+class ConfigurationSetInfo:
+    config_set_key: dict[ConfigSet, int]
+    sets: list[ConfigSet]
+    successors: list[dict[int, int]]
+
+    def __init__(self):
+        self.config_set_key = {}
+        self.sets = []
+        self.successors = []
+
+    def register_config_set(self, c: ConfigSet) -> typing.Tuple[int, bool]:
+        existing = self.config_set_key.get(c)
+        if existing is not None:
+            return existing, False
+
+        index = len(self.sets)
+        self.sets.append(c)
+        self.successors.append({})
+        self.config_set_key[c] = index
+        return index, True
+
+    def add_successor(self, c_id: int, symbol: int, successor: int):
+        self.successors[c_id][symbol] = successor
+
 class GenerateLR0(object):
     """Generate parser tables for an LR0 parser.
 
@@ -259,6 +283,10 @@ class GenerateLR0(object):
     symbol_key: dict[str, int]
     start_symbol: int
     end_symbol: int
+
+    config_sets_key: dict[ConfigSet, int]
+    successors: list[set[int]]
+
 
     def __init__(self, start: str, grammar: list[typing.Tuple[str, list[str]]]):
         """Initialize the parser generator with the specified grammar and
@@ -392,7 +420,7 @@ class GenerateLR0(object):
         closure = self.gen_closure(seeds)
         return closure
 
-    def gen_all_successors(self, config_set: typing.Iterable[Configuration]) -> list[ConfigSet]:
+    def gen_all_successors(self, config_set: typing.Iterable[Configuration]) -> list[typing.Tuple[int, ConfigSet]]:
         """Return all of the non-empty successors for the given config set."""
         possible = tuple(sorted({
             config.next
@@ -404,31 +432,32 @@ class GenerateLR0(object):
         for symbol in possible:
             successor = self.gen_successor(config_set, symbol)
             if len(successor) > 0:
-                next.append(successor)
+                next.append((symbol, successor))
 
         return next
 
-    def gen_sets(self, config_set: typing.Tuple[Configuration,...]) -> typing.Tuple[ConfigSet, ...]:
+    def gen_sets(self, config_set: typing.Tuple[Configuration,...]) -> ConfigurationSetInfo:
         """Generate all configuration sets starting from the provided set."""
-        # NOTE: Not a set because we need to maintain insertion order!
-        #       The first element in the dictionary needs to be the intial
-        #       set.
-        F = {}
+        result = ConfigurationSetInfo()
+
+        successors = []
         pending = [config_set]
         while len(pending) > 0:
             config_set = pending.pop()
-            if config_set in F:
-                continue
-            # print(f"pending: {len(pending)}  F: {len(F)}")
 
-            F[config_set] = len(F)
-            for successor in self.gen_all_successors(config_set):
-                pending.append(successor)
+            id, is_new = result.register_config_set(config_set)
+            if is_new:
+                for symbol, successor in self.gen_all_successors(config_set):
+                    successors.append((id,symbol,successor))
+                    pending.append(successor)
 
-        return tuple(F.keys())
+        for id,symbol,successor in successors:
+            result.add_successor(id, symbol, result.config_set_key[successor])
+
+        return result
 
 
-    def gen_all_sets(self) -> typing.Tuple[ConfigSet, ...]:
+    def gen_all_sets(self) -> ConfigurationSetInfo:
         """Generate all of the configuration sets for the grammar."""
         seeds = tuple(
             Configuration.from_rule(self.start_symbol, rule)
@@ -485,12 +514,15 @@ class GenerateLR0(object):
         builder = TableBuilder(self.alphabet)
 
         config_sets = self.gen_all_sets()
-        set_index = self.build_set_index(config_sets)
 
-        for config_set in config_sets:
+        # WHAT.
+        # set_index = self.build_set_index(config_sets)
+
+
+        for config_set_id, config_set in enumerate(config_sets.sets):
             builder.new_row(config_set)
+            successors = config_sets.successors[config_set_id]
 
-            # Actions
             for config in config_set:
                 config_next = config.next
                 if config_next is None:
@@ -501,19 +533,13 @@ class GenerateLR0(object):
                         builder.set_table_accept(self.end_symbol, config)
 
                 elif self.terminals[config_next]:
-                    successor = self.gen_successor(config_set, config_next)
-                    index = self.find_set_index(set_index, successor)
-                    assert index is not None
+                    index = successors[config_next]
                     builder.set_table_shift(config_next, index, config)
 
             # Gotos
-            for symbol, is_nonterminal in enumerate(self.nonterminals):
-                if is_nonterminal:
-                    successor = self.gen_successor(config_set, symbol)
-                    index = self.find_set_index(set_index, successor)
-                    if index is not None:
-                        builder.set_table_goto(symbol, index)
-
+            for symbol, index in successors.items():
+                if self.nonterminals[symbol]:
+                    builder.set_table_goto(symbol, index)
 
         return builder.flush()
 
@@ -857,7 +883,7 @@ class GenerateLALR(GenerateLR1):
         b_no_la = tuple(s.clear_lookahead() for s in b)
         return a_no_la == b_no_la
 
-    def gen_sets(self, config_set):
+    def gen_sets(self, config_set) -> ConfigurationSetInfo:
         """Recursively generate all configuration sets starting from the
         provided set, and merge them with the provided set 'F'.
 
@@ -868,6 +894,7 @@ class GenerateLALR(GenerateLR1):
         and replace the set in F, returning the modified set.
         """
         F = {}
+        successors = []
         pending = [config_set]
         while len(pending) > 0:
             config_set = pending.pop()
@@ -878,12 +905,33 @@ class GenerateLALR(GenerateLR1):
                 F[config_set_no_la] = self.merge_sets(config_set, existing)
             else:
                 F[config_set_no_la] = config_set
-                for successor in self.gen_all_successors(config_set):
+                for symbol, successor in self.gen_all_successors(config_set):
+                    successor_no_la = tuple(s.clear_lookahead() for s in successor)
+                    successors.append((config_set_no_la, symbol, successor_no_la))
                     pending.append(successor)
 
-        # NOTE: We count on insertion order here! The first element must be the
-        #       starting state!
-        return tuple(F.values())
+        # Register all the actually merged, final config sets.
+        result = ConfigurationSetInfo()
+        for config_set in F.values():
+            result.register_config_set(config_set)
+
+        # Now record all the successors that we found. Of course, the actual
+        # sets that wound up in the ConfigurationSetInfo don't match anything
+        # we found during the previous phase.
+        #
+        # *Fortunately* we recorded the no-lookahead keys in the successors
+        # so we can find the final sets, then look them up in the registered
+        # sets, and actually register the successor.
+        for config_set_no_la, symbol, successor_no_la in successors:
+            actual_config_set = F[config_set_no_la]
+            from_index = result.config_set_key[actual_config_set]
+
+            actual_successor = F[successor_no_la]
+            to_index = result.config_set_key[actual_successor]
+
+            result.add_successor(from_index, symbol, to_index)
+
+        return result
 
     def set_without_lookahead(self, config_set: ConfigSet) -> ConfigSet:
         return tuple(sorted(set(c.clear_lookahead() for c in  config_set)))
