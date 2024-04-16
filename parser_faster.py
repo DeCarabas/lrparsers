@@ -125,7 +125,7 @@ class Configuration:
     def format(self, alphabet: list[str]) -> str:
         la = ", " + str(tuple(alphabet[i] for i in self.lookahead)) if self.lookahead != () else ""
         return "{name} -> {bits}{lookahead}".format(
-            name=self.name,
+            name=alphabet[self.name],
             bits=' '.join([
                 '* ' + alphabet[sym] if i == self.position else alphabet[sym]
                 for i, sym in enumerate(self.symbols)
@@ -136,11 +136,15 @@ class Configuration:
 ConfigSet = typing.Tuple[Configuration, ...]
 
 class TableBuilder(object):
+    row: None | list[typing.Tuple[None | typing.Tuple, None | Configuration]]
+    row_conflicts: list[typing.Tuple[int, typing.Tuple, Configuration]]
+
     def __init__(self, alphabet: list[str]):
         self.errors = []
         self.table = []
         self.alphabet = alphabet
         self.row = None
+        self.row_conflicts = []
 
     def flush(self):
         self._flush_row()
@@ -150,6 +154,7 @@ class TableBuilder(object):
 
     def new_row(self, config_set):
         self._flush_row()
+        self.row_conflicts = []
         self.row = [(None, None) for _ in self.alphabet]
         self.current_config_set = config_set
 
@@ -161,6 +166,48 @@ class TableBuilder(object):
                 if v[0] is not None
             }
             self.table.append(actions)
+
+        # OK we need to group our row conflicts by symbol, then
+        grouping = {}
+        for symbol, action, configuration in self.row_conflicts:
+            config_action_table = grouping.get(symbol)
+            if config_action_table is None:
+                config_action_table = {}
+                grouping[symbol] = config_action_table
+
+            config_action_table[configuration] = action
+
+        for symbol, action_table in grouping.items():
+            error_string_parts = []
+            error_string_parts.append(
+                f"When we see {self.alphabet[symbol]} we don't know whether:\n",
+            )
+            for config, action in action_table.items():
+                error_string_parts.append(
+                    f"  - we are in the rule {self.alphabet[config.name]} -> ",
+                )
+
+                for index, symbol in enumerate(config.symbols):
+                    if index == config.position:
+                        error_string_parts.append("* ")
+                    error_string_parts.append(f"{self.alphabet[symbol]} ")
+
+                if config.next is None:
+                    error_string_parts.append(" * ")
+                error_string_parts.append(" and we should ")
+
+                if action[0] == "reduce":
+                    error_string_parts.append(f"pop {action[2]} values off the stack and make a {action[1]}")
+                elif action[0] == "shift":
+                    error_string_parts.append(f"consume the token and keep going")
+                elif action[0] == "accept":
+                    error_string_parts.append(f"accept the parse")
+                else:
+                    assert action[0] == "goto", f"Unknown action {action[0]}"
+                    raise Exception("Shouldn't conflict on goto ever")
+                error_string_parts.append("\n")
+
+            self.errors.append("".join(error_string_parts))
 
 
     def set_table_reduce(self, symbol: int, config):
@@ -179,7 +226,7 @@ class TableBuilder(object):
         action = ('goto', index)
         self._set_table_action(symbol, action, None)
 
-    def _set_table_action(self, symbol_id: int, action, config):
+    def _set_table_action(self, symbol_id: int, action, config: Configuration|None):
         """Set the action for 'symbol' in the table row to 'action'.
 
         This is destructive; it changes the table. It raises an error if
@@ -190,22 +237,13 @@ class TableBuilder(object):
         assert self.row is not None
         existing, existing_config = self.row[symbol_id]
         if existing is not None and existing != action:
-            config_old = str(existing_config)
-            config_new = str(config)
-            max_len = max(len(config_old), len(config_new)) + 1
-            error = (
-                "Conflicting actions for token '{symbol}':\n"
-                "  {config_old: <{max_len}}: {old}\n"
-                "  {config_new: <{max_len}}: {new}\n".format(
-                    config_old=config_old,
-                    config_new=config_new,
-                    max_len=max_len,
-                    old=existing,
-                    new=action,
-                    symbol=self.alphabet[symbol_id],
-                )
-            )
-            self.errors.append(error)
+            assert existing_config is not None
+            assert config is not None
+
+            # OK my uh... configs?
+            self.row_conflicts.append((symbol_id, existing, existing_config))
+            self.row_conflicts.append((symbol_id, action, config))
+
         self.row[symbol_id] = (action, config)
 
 
