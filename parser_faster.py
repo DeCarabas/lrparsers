@@ -3,10 +3,13 @@ might expect the code did NOT work acceptibly.
 
 This version has some performance work done.
 
+It also supports precedence.
+
 2023
 """
 import collections
 import dataclasses
+import enum
 import typing
 
 
@@ -196,6 +199,14 @@ class ConfigurationSetInfo:
         raise KeyError("Unable to find a path to the target set!")
 
 
+class Assoc(enum.Enum):
+    """Associativity of a rule."""
+    NONE = 0
+    LEFT = 1
+    RIGHT = 2
+
+
+
 class ErrorCollection:
     errors: dict[ConfigSet, dict[int, dict[Configuration, typing.Tuple]]]
 
@@ -259,15 +270,17 @@ class ErrorCollection:
 
 
 class TableBuilder(object):
-    row: None | list[typing.Tuple[None | typing.Tuple, None | Configuration]]
-    table: list[dict[str, typing.Tuple]]
-    config_sets: dict[ConfigSet, int] # Map config sets to rows.
     errors: ErrorCollection
+    table: list[dict[str, typing.Tuple]]
+    alphabet: list[str]
+    precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
+    row: None | list[typing.Tuple[None | typing.Tuple, None | Configuration]]
 
-    def __init__(self, alphabet: list[str]):
+    def __init__(self, alphabet: list[str], precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]):
         self.errors = ErrorCollection()
         self.table = []
         self.alphabet = alphabet
+        self.precedence = precedence
         self.row = None
 
     def flush(self, all_sets: ConfigurationSetInfo):
@@ -322,11 +335,54 @@ class TableBuilder(object):
             assert existing_config is not None
             assert config is not None
 
-            # Record the conflicts.
-            self.errors.add_error(self.current_config_set, symbol_id, existing_config, existing)
-            self.errors.add_error(self.current_config_set, symbol_id, config, action)
+            # Maybe we can resolve the conflict with precedence?
+            existing_assoc, existing_prec = self.precedence[existing_config.name]
+            new_assoc, new_prec = self.precedence[config.name]
+
+            if existing_prec > new_prec:
+                # Precedence of the action in the table already wins, do nothing.
+                return
+
+            elif existing_prec == new_prec:
+                # It's an actual conflict, use associativity if we can.
+                # If there's a conflict in associativity then it's a real conflict!
+                assoc = Assoc.NONE
+                if existing_assoc == Assoc.NONE:
+                    assoc = new_assoc
+                elif new_assoc == Assoc.NONE:
+                    assoc = existing_assoc
+                elif new_assoc == existing_assoc:
+                    assoc = new_assoc
+
+                resolved = False
+                if assoc == Assoc.LEFT:
+                    # Prefer reduce over shift
+                    if action[0] == 'shift' and existing[0] == 'reduce':
+                        action = existing
+                        resolved = True
+                    elif action[0] == 'reduce' and existing[0] == 'shift':
+                        resolved = True
+
+                elif assoc == Assoc.RIGHT:
+                    # Prefer shift over reduce
+                    if action[0] == 'shift' and existing[0] == 'reduce':
+                        resolved = True
+                    elif action[0] == 'reduce' and existing[0] == 'shift':
+                        action = existing
+                        resolved = True
+
+                if not resolved:
+                    # Record the conflicts.
+                    self.errors.add_error(self.current_config_set, symbol_id, existing_config, existing)
+                    self.errors.add_error(self.current_config_set, symbol_id, config, action)
+
+            else:
+                # Precedence of the new action is greater than the existing
+                # action, just allow the overwrite with no change.
+                pass
 
         self.row[symbol_id] = (action, config)
+
 
 
 class GenerateLR0(object):
@@ -357,24 +413,13 @@ class GenerateLR0(object):
       ('O', []),
 
     means that O can be matched with nothing.
-
-    Implementation notes:
-    - This is implemented in the dumbest way possible, in order to be the
-      most understandable it can be. I built this to learn, and I want to
-      make sure I can keep learning with it.
-
-    - We tend to use tuples everywhere. This is because tuples can be
-      compared for equality and put into tables and all that jazz. They might
-      be a little bit slower in places but like I said, this is for
-      learning. (Also, if we need this to run faster we can probably go a
-      long way by memoizing results, which is much easier if we have tuples
-      everywhere.)
     """
 
     alphabet: list[str]
     grammar: list[list[typing.Tuple[int, ...]]]
-    nonterminals: typing.Tuple[bool, ...]
-    terminals: typing.Tuple[bool, ...]
+    nonterminal: typing.Tuple[bool, ...]
+    terminal: typing.Tuple[bool, ...]
+    precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
 
     symbol_key: dict[str, int]
     start_symbol: int
@@ -384,7 +429,12 @@ class GenerateLR0(object):
     successors: list[set[int]]
 
 
-    def __init__(self, start: str, grammar: list[typing.Tuple[str, list[str]]]):
+    def __init__(
+        self,
+        start: str,
+        grammar: list[typing.Tuple[str, list[str]]],
+        precedence: None | dict[str, typing.Tuple[Assoc, int]] = None,
+    ):
         """Initialize the parser generator with the specified grammar and
         start symbol.
         """
@@ -426,30 +476,34 @@ class GenerateLR0(object):
         # We count on python dictionaries retaining the insertion order, like
         # it or not.
         full_grammar = [list() for _ in self.alphabet]
-        terminals = [True for _ in self.alphabet]
-        assert terminals[end_symbol]
+        terminal = [True for _ in self.alphabet]
+        assert terminal[end_symbol]
 
-        nonterminals = [False for _ in self.alphabet]
+        nonterminal = [False for _ in self.alphabet]
 
         for name, rule in grammar:
             name_symbol = symbol_key[name]
 
-            terminals[name_symbol] = False
-            nonterminals[name_symbol] = True
+            terminal[name_symbol] = False
+            nonterminal[name_symbol] = True
 
             rules = full_grammar[name_symbol]
             rules.append(tuple(symbol_key[symbol] for symbol in rule))
 
         self.grammar = full_grammar
         self.grammar[start_symbol].append((symbol_key[start],))
-        terminals[start_symbol] = False
-        nonterminals[start_symbol] = True
+        terminal[start_symbol] = False
+        nonterminal[start_symbol] = True
 
-        self.terminals = tuple(terminals)
-        self.nonterminals = tuple(nonterminals)
+        self.terminal = tuple(terminal)
+        self.nonterminal = tuple(nonterminal)
 
-        assert self.terminals[end_symbol]
-        assert self.nonterminals[start_symbol]
+        assert self.terminal[end_symbol]
+        assert self.nonterminal[start_symbol]
+
+        if precedence is None:
+            precedence = {}
+        self.precedence = tuple(precedence.get(a, (Assoc.NONE, 0)) for a in self.alphabet)
 
         self.symbol_key = symbol_key
         self.start_symbol = start_symbol
@@ -497,7 +551,7 @@ class GenerateLR0(object):
 
         return tuple(sorted(closure)) # TODO: Why tuple?
 
-    def gen_successor(self, config_set: typing.Iterable[Configuration], symbol: str) -> ConfigSet:
+    def gen_successor(self, config_set: typing.Iterable[Configuration], symbol: int) -> ConfigSet:
         """Compute the successor state for the given config set and the
         given symbol.
 
@@ -564,7 +618,7 @@ class GenerateLR0(object):
 
         In an LR0 parser, this is just the set of all terminals."""
         del(config)
-        return [index for index, value in enumerate(self.terminals) if value]
+        return [index for index, value in enumerate(self.terminal) if value]
 
     def gen_table(self):
         """Generate the parse table.
@@ -595,7 +649,7 @@ class GenerateLR0(object):
         Anything missing from the row indicates an error.
         """
         config_sets = self.gen_all_sets()
-        builder = TableBuilder(self.alphabet)
+        builder = TableBuilder(self.alphabet, self.precedence)
 
         for config_set_id, config_set in enumerate(config_sets.sets):
             builder.new_row(config_set)
@@ -610,13 +664,13 @@ class GenerateLR0(object):
                     else:
                         builder.set_table_accept(self.end_symbol, config)
 
-                elif self.terminals[config_next]:
+                elif self.terminal[config_next]:
                     index = successors[config_next]
                     builder.set_table_shift(config_next, index, config)
 
             # Gotos
             for symbol, index in successors.items():
-                if self.nonterminals[symbol]:
+                if self.nonterminal[symbol]:
                     builder.set_table_goto(symbol, index)
 
         return builder.flush(config_sets)
@@ -700,27 +754,22 @@ class FirstInfo:
     @classmethod
     def from_grammar(
         cls,
-        alphabet: list[str],
         grammar: list[list[typing.Tuple[int,...]]],
-        terminals: typing.Tuple[bool, ...],
+        terminal: typing.Tuple[bool, ...],
     ):
-        # print("******* GENERATING FIRSTS ********")
-
         # Add all terminals to their own firsts
         firsts = []
-        for index, is_terminal in enumerate(terminals):
+        for index, is_terminal in enumerate(terminal):
             firsts.append(set())
             if is_terminal:
                 firsts[index].add(index)
 
-        epsilons = [False for _ in terminals]
+        epsilons = [False for _ in terminal]
         changed = True
         while changed:
-            # print("========= ITERATION")
             changed = False
             for name, rules in enumerate(grammar):
                 f = firsts[name]
-                # print(f"    {alphabet[name]} -> {[alphabet[s] for s in f]}")
                 for rule in rules:
                     if len(rule) == 0:
                         changed = changed or not epsilons[name]
@@ -728,11 +777,7 @@ class FirstInfo:
                         continue
 
                     for index, symbol in enumerate(rule):
-                        # if terminals[symbol]:
-                        #     changed = add_changed(f, symbol) or changed
-                        # else:
                         other_firsts = firsts[symbol]
-                        # print(f"        adding {alphabet[symbol]} -> {[alphabet[s] for s in other_firsts]}")
                         changed = update_changed(f, other_firsts) or changed
 
                         is_last = index == len(rule) - 1
@@ -750,7 +795,6 @@ class FirstInfo:
                             # looping through the symbols in this rule.
                             break
 
-        # print("******* DONE GENERATING FIRSTS ********")
         return FirstInfo(firsts=firsts, is_epsilon=epsilons)
 
 @dataclasses.dataclass(frozen=True)
@@ -761,7 +805,7 @@ class FollowInfo:
     def from_grammar(
         cls,
         grammar: list[list[typing.Tuple[int,...]]],
-        terminals: typing.Tuple[bool, ...],
+        terminal: typing.Tuple[bool, ...],
         start_symbol: int,
         end_symbol: int,
         firsts: FirstInfo,
@@ -778,7 +822,7 @@ class FollowInfo:
                     prev_symbol = None
                     for symbol in reversed(rule):
                         f = follows[symbol]
-                        if terminals[symbol]:
+                        if terminal[symbol]:
                             # This particular rule can't produce epsilon.
                             epsilon = False
                             prev_symbol = symbol
@@ -826,10 +870,10 @@ class GenerateSLR1(GenerateLR0):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._firsts = FirstInfo.from_grammar(self.alphabet, self.grammar, self.terminals)
+        self._firsts = FirstInfo.from_grammar(self.grammar, self.terminal)
         self._follows = FollowInfo.from_grammar(
             self.grammar,
-            self.terminals,
+            self.terminal,
             self.start_symbol,
             self.end_symbol,
             self._firsts,
@@ -1049,24 +1093,24 @@ def format_table(generator, table):
         elif action[0] == 'reduce':
             return 'r' + str(action[1])
 
-    terminals = [
+    terminals = list(sorted(
         generator.alphabet[i]
-        for i,v in enumerate(generator.terminals)
+        for i,v in enumerate(generator.terminal)
         if v
-    ]
-    nonterminals = [
+    ))
+    nonterminals = list(sorted(
         generator.alphabet[i]
-        for i,v in enumerate(generator.nonterminals)
+        for i,v in enumerate(generator.nonterminal)
         if v
-    ]
+    ))
     header = "    | {terms} | {nts}".format(
         terms=' '.join(
             '{0: <6}'.format(terminal)
-            for terminal in sorted(terminals)
+            for terminal in terminals
         ),
         nts=' '.join(
             '{0: <5}'.format(nt)
-            for nt in sorted(nonterminals)
+            for nt in nonterminals
         ),
     )
 
@@ -1078,11 +1122,11 @@ def format_table(generator, table):
             index=i,
             actions=' '.join(
                 '{0: <6}'.format(format_action(row, terminal))
-                for terminal in sorted(terminals)
+                for terminal in terminals
             ),
             gotos=' '.join(
                 '{0: <5}'.format(row.get(nt, ('error', ''))[1])
-                for nt in sorted(nonterminals)
+                for nt in nonterminals
             ),
         )
         for i, row in enumerate(table)
