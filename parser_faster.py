@@ -5,8 +5,8 @@ This version has some performance work done.
 
 2023
 """
+import collections
 import dataclasses
-import functools
 import typing
 
 
@@ -135,26 +135,150 @@ class Configuration:
 
 ConfigSet = typing.Tuple[Configuration, ...]
 
+class ConfigurationSetInfo:
+    """When we build a grammar into a table, the first thing we need to do is
+    generate all the configuration sets and their successors. This is the
+    structure that tracks the result of that computation.
+
+    (Different generators vary in the details of how they generate this
+    structure, but they all compute this information.)
+    """
+    config_set_key: dict[ConfigSet, int]
+    sets: list[ConfigSet]
+    successors: list[dict[int, int]]
+
+    def __init__(self):
+        self.config_set_key = {}
+        self.sets = []
+        self.successors = []
+
+    def register_config_set(self, c: ConfigSet) -> typing.Tuple[int, bool]:
+        """Potentially add a new config set to the set of sets. Returns the
+        canonical ID of the set within this structure, along with a boolean
+        indicating whether the set was just added or not.
+
+        (You can use this integer to get the set back, if you need it, and
+        also access the successors table.)
+        """
+        existing = self.config_set_key.get(c)
+        if existing is not None:
+            return existing, False
+
+        index = len(self.sets)
+        self.sets.append(c)
+        self.successors.append({})
+        self.config_set_key[c] = index
+        return index, True
+
+    def add_successor(self, c_id: int, symbol: int, successor: int):
+        """Register sucessor(`c_id`, `symbol`) -> `successor`
+        """
+        self.successors[c_id][symbol] = successor
+
+    def find_path_to_set(self, target_set: ConfigSet) -> list[int]:
+        target_index = self.config_set_key[target_set]
+        visited = set()
+
+        queue = collections.deque()
+        queue.appendleft((0, []))
+        while len(queue) > 0:
+            set_index, path = queue.pop()
+            if set_index == target_index:
+                return path
+
+            if set_index in visited:
+                continue
+            visited.add(set_index)
+
+            for symbol, successor in self.successors[set_index].items():
+                queue.appendleft((successor, path + [symbol]))
+
+        raise KeyError("Unable to find a path to the target set!")
+
+
+class ErrorCollection:
+    errors: dict[ConfigSet, dict[int, dict[Configuration, typing.Tuple]]]
+
+    def __init__(self):
+        self.errors = {}
+
+    def any(self) -> bool:
+        return len(self.errors) > 0
+
+    def add_error(self, config_set: ConfigSet, symbol: int, config: Configuration, action: typing.Tuple):
+        set_errors = self.errors.get(config_set)
+        if set_errors is None:
+            set_errors = {}
+            self.errors[config_set] = set_errors
+
+        symbol_errors = set_errors.get(symbol)
+        if symbol_errors is None:
+            symbol_errors = {}
+            set_errors[symbol] = symbol_errors
+
+        symbol_errors[config] = action
+
+
+    def format(
+        self,
+        alphabet: list[str],
+        all_sets: ConfigurationSetInfo,
+    ) -> str | None:
+        if len(self.errors) is None:
+            return None
+
+        errors = []
+        for config_set, set_errors in self.errors.items():
+            path = all_sets.find_path_to_set(config_set)
+            path_str = " ".join(alphabet[s] for s in path)
+
+            for symbol, symbol_errors in set_errors.items():
+                lines = []
+                lines.append(f"When we have parsed '{path_str}' and see '{alphabet[symbol]}' we don't know whether:")
+                for config, action in symbol_errors.items():
+                    name = alphabet[config.name]
+                    rule = " ".join(f"{'* ' if config.position == i else ''}{alphabet[s]}" for i,s in enumerate(config.symbols))
+                    if config.next is None:
+                        rule += " *"
+
+                    if action[0] == 'reduce':
+                        action_str = f"pop {action[2]} values off the stack and make a {action[1]}"
+                    elif action[0] == 'shift':
+                        action_str = "consume the token and keep going"
+                    elif action[0] == 'accept':
+                        action_str = "accept the parse"
+                    else:
+                        assert action[0] == "goto", f"Unknown action {action[0]}"
+                        raise Exception("Shouldn't conflict on goto ever")
+
+                    lines.append(f"  - We are in the rule `{name}: {rule}` and we should {action_str}")
+
+                errors.append("\n".join(lines))
+
+        return "\n\n".join(errors)
+
+
 class TableBuilder(object):
     row: None | list[typing.Tuple[None | typing.Tuple, None | Configuration]]
-    row_conflicts: list[typing.Tuple[int, typing.Tuple, Configuration]]
+    table: list[dict[str, typing.Tuple]]
+    config_sets: dict[ConfigSet, int] # Map config sets to rows.
+    errors: ErrorCollection
 
     def __init__(self, alphabet: list[str]):
-        self.errors = []
+        self.errors = ErrorCollection()
         self.table = []
         self.alphabet = alphabet
         self.row = None
-        self.row_conflicts = []
 
-    def flush(self):
+    def flush(self, all_sets: ConfigurationSetInfo):
         self._flush_row()
-        if len(self.errors) > 0:
-            raise ValueError("\n\n".join(self.errors))
+        if self.errors.any():
+            errors = self.errors.format(self.alphabet, all_sets)
+            raise ValueError(f"Errors building the table:\n\n{errors}")
         return self.table
 
-    def new_row(self, config_set):
+    def new_row(self, config_set: ConfigSet):
         self._flush_row()
-        self.row_conflicts = []
         self.row = [(None, None) for _ in self.alphabet]
         self.current_config_set = config_set
 
@@ -166,48 +290,6 @@ class TableBuilder(object):
                 if v[0] is not None
             }
             self.table.append(actions)
-
-        # OK we need to group our row conflicts by symbol, then
-        grouping = {}
-        for symbol, action, configuration in self.row_conflicts:
-            config_action_table = grouping.get(symbol)
-            if config_action_table is None:
-                config_action_table = {}
-                grouping[symbol] = config_action_table
-
-            config_action_table[configuration] = action
-
-        for symbol, action_table in grouping.items():
-            error_string_parts = []
-            error_string_parts.append(
-                f"When we see {self.alphabet[symbol]} we don't know whether:\n",
-            )
-            for config, action in action_table.items():
-                error_string_parts.append(
-                    f"  - we are in the rule {self.alphabet[config.name]} -> ",
-                )
-
-                for index, symbol in enumerate(config.symbols):
-                    if index == config.position:
-                        error_string_parts.append("* ")
-                    error_string_parts.append(f"{self.alphabet[symbol]} ")
-
-                if config.next is None:
-                    error_string_parts.append(" * ")
-                error_string_parts.append(" and we should ")
-
-                if action[0] == "reduce":
-                    error_string_parts.append(f"pop {action[2]} values off the stack and make a {action[1]}")
-                elif action[0] == "shift":
-                    error_string_parts.append(f"consume the token and keep going")
-                elif action[0] == "accept":
-                    error_string_parts.append(f"accept the parse")
-                else:
-                    assert action[0] == "goto", f"Unknown action {action[0]}"
-                    raise Exception("Shouldn't conflict on goto ever")
-                error_string_parts.append("\n")
-
-            self.errors.append("".join(error_string_parts))
 
 
     def set_table_reduce(self, symbol: int, config):
@@ -240,36 +322,12 @@ class TableBuilder(object):
             assert existing_config is not None
             assert config is not None
 
-            # OK my uh... configs?
-            self.row_conflicts.append((symbol_id, existing, existing_config))
-            self.row_conflicts.append((symbol_id, action, config))
+            # Record the conflicts.
+            self.errors.add_error(self.current_config_set, symbol_id, existing_config, existing)
+            self.errors.add_error(self.current_config_set, symbol_id, config, action)
 
         self.row[symbol_id] = (action, config)
 
-
-class ConfigurationSetInfo:
-    config_set_key: dict[ConfigSet, int]
-    sets: list[ConfigSet]
-    successors: list[dict[int, int]]
-
-    def __init__(self):
-        self.config_set_key = {}
-        self.sets = []
-        self.successors = []
-
-    def register_config_set(self, c: ConfigSet) -> typing.Tuple[int, bool]:
-        existing = self.config_set_key.get(c)
-        if existing is not None:
-            return existing, False
-
-        index = len(self.sets)
-        self.sets.append(c)
-        self.successors.append({})
-        self.config_set_key[c] = index
-        return index, True
-
-    def add_successor(self, c_id: int, symbol: int, successor: int):
-        self.successors[c_id][symbol] = successor
 
 class GenerateLR0(object):
     """Generate parser tables for an LR0 parser.
@@ -398,7 +456,6 @@ class GenerateLR0(object):
         self.end_symbol = end_symbol
 
 
-    @functools.cache
     def gen_closure_next(self, config: Configuration):
         """Return the next set of configurations in the closure for
         config.
@@ -418,7 +475,6 @@ class GenerateLR0(object):
                 for rule in self.grammar[next]
             )
 
-    @functools.cache
     def gen_closure(self, seeds: typing.Iterable[Configuration]) -> ConfigSet:
         """Compute the closure for the specified configs. The closure is all
         of the configurations we could be in. Specifically, if the position
@@ -441,7 +497,6 @@ class GenerateLR0(object):
 
         return tuple(sorted(closure)) # TODO: Why tuple?
 
-    @functools.cache
     def gen_successor(self, config_set: typing.Iterable[Configuration], symbol: str) -> ConfigSet:
         """Compute the successor state for the given config set and the
         given symbol.
@@ -494,7 +549,6 @@ class GenerateLR0(object):
 
         return result
 
-
     def gen_all_sets(self) -> ConfigurationSetInfo:
         """Generate all of the configuration sets for the grammar."""
         seeds = tuple(
@@ -503,15 +557,6 @@ class GenerateLR0(object):
         )
         initial_set = self.gen_closure(seeds)
         return self.gen_sets(initial_set)
-
-    def build_set_index(self, sets: typing.Tuple[ConfigSet, ...]) -> dict[ConfigSet, int]:
-        return { s: index for index, s in enumerate(sets) }
-
-    def find_set_index(self, sets: dict[ConfigSet, int], s: ConfigSet) -> int | None:
-        """Find the specified set in the set of sets, and return the
-        index, or None if it is not found.
-        """
-        return sets.get(s)
 
     def gen_reduce_set(self, config: Configuration) -> typing.Iterable[int]:
         """Return the set of symbols that indicate we should reduce the given
@@ -549,13 +594,8 @@ class GenerateLR0(object):
 
         Anything missing from the row indicates an error.
         """
-        builder = TableBuilder(self.alphabet)
-
         config_sets = self.gen_all_sets()
-
-        # WHAT.
-        # set_index = self.build_set_index(config_sets)
-
+        builder = TableBuilder(self.alphabet)
 
         for config_set_id, config_set in enumerate(config_sets.sets):
             builder.new_row(config_set)
@@ -579,7 +619,7 @@ class GenerateLR0(object):
                 if self.nonterminals[symbol]:
                     builder.set_table_goto(symbol, index)
 
-        return builder.flush()
+        return builder.flush(config_sets)
 
 
 def parse(table, input, trace=False):
@@ -642,12 +682,12 @@ def parse(table, input, trace=False):
 ###############################################################################
 # SLR(1)
 ###############################################################################
-def add_changed(items: set, item)->bool:
+def add_changed(items: set[int], item: int)->bool:
     old_len = len(items)
     items.add(item)
     return old_len != len(items)
 
-def update_changed(items: set, other: set) -> bool:
+def update_changed(items: set[int], other: set[int]) -> bool:
     old_len = len(items)
     items.update(other)
     return old_len != len(items)
@@ -660,22 +700,27 @@ class FirstInfo:
     @classmethod
     def from_grammar(
         cls,
+        alphabet: list[str],
         grammar: list[list[typing.Tuple[int,...]]],
         terminals: typing.Tuple[bool, ...],
     ):
-        firsts = [set() for _ in grammar]
+        # print("******* GENERATING FIRSTS ********")
 
         # Add all terminals to their own firsts
+        firsts = []
         for index, is_terminal in enumerate(terminals):
+            firsts.append(set())
             if is_terminal:
                 firsts[index].add(index)
 
-        epsilons = [False] * len(grammar)
+        epsilons = [False for _ in terminals]
         changed = True
         while changed:
+            # print("========= ITERATION")
             changed = False
             for name, rules in enumerate(grammar):
                 f = firsts[name]
+                # print(f"    {alphabet[name]} -> {[alphabet[s] for s in f]}")
                 for rule in rules:
                     if len(rule) == 0:
                         changed = changed or not epsilons[name]
@@ -683,27 +728,29 @@ class FirstInfo:
                         continue
 
                     for index, symbol in enumerate(rule):
-                        if terminals[symbol]:
-                            changed = add_changed(f, symbol) or changed
-                        else:
-                            other_firsts = firsts[symbol]
-                            changed = update_changed(f, other_firsts) or changed
+                        # if terminals[symbol]:
+                        #     changed = add_changed(f, symbol) or changed
+                        # else:
+                        other_firsts = firsts[symbol]
+                        # print(f"        adding {alphabet[symbol]} -> {[alphabet[s] for s in other_firsts]}")
+                        changed = update_changed(f, other_firsts) or changed
 
-                            is_last = index == len(rule) - 1
-                            if is_last and epsilons[symbol]:
-                                # If this is the last symbol and the last
-                                # symbol can be empty then I can be empty
-                                # too! :P
-                                changed = changed or not epsilons[name]
-                                epsilons[name] = True
+                        is_last = index == len(rule) - 1
+                        if is_last and epsilons[symbol]:
+                            # If this is the last symbol and the last
+                            # symbol can be empty then I can be empty
+                            # too! :P
+                            changed = changed or not epsilons[name]
+                            epsilons[name] = True
 
-                            if not epsilons[symbol]:
-                                # If we believe that there is at least one
-                                # terminal in the first set of this
-                                # nonterminal then I don't have to keep
-                                # looping through the symbols in this rule.
-                                break
+                        if not epsilons[symbol]:
+                            # If we believe that there is at least one
+                            # terminal in the first set of this
+                            # nonterminal then I don't have to keep
+                            # looping through the symbols in this rule.
+                            break
 
+        # print("******* DONE GENERATING FIRSTS ********")
         return FirstInfo(firsts=firsts, is_epsilon=epsilons)
 
 @dataclasses.dataclass(frozen=True)
@@ -779,7 +826,7 @@ class GenerateSLR1(GenerateLR0):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._firsts = FirstInfo.from_grammar(self.grammar, self.terminals)
+        self._firsts = FirstInfo.from_grammar(self.alphabet, self.grammar, self.terminals)
         self._follows = FollowInfo.from_grammar(
             self.grammar,
             self.terminals,
@@ -801,7 +848,7 @@ class GenerateSLR1(GenerateLR0):
         result = set()
         for s in symbols:
             result.update(self._firsts.firsts[s])
-            if s not in self._firsts.is_epsilon:
+            if not self._firsts.is_epsilon[s]:
                 return (result, False)
 
         return (result, True)
@@ -842,7 +889,6 @@ class GenerateLR1(GenerateSLR1):
         In an LR1 parser, this is the lookahead of the configuration."""
         return config.lookahead
 
-    @functools.cache
     def gen_closure_next(self, config: Configuration):
         """Return the next set of configurations in the closure for
         config.
@@ -974,21 +1020,6 @@ class GenerateLALR(GenerateLR1):
     def set_without_lookahead(self, config_set: ConfigSet) -> ConfigSet:
         return tuple(sorted(set(c.clear_lookahead() for c in  config_set)))
 
-    def build_set_index(self, sets: typing.Tuple[ConfigSet, ...]) -> dict[ConfigSet, int]:
-        index = {}
-        for s in sets:
-            s_no_la = self.set_without_lookahead(s)
-            if s_no_la not in index:
-                index[s_no_la] = len(index)
-        return index
-
-    def find_set_index(self, sets: dict[ConfigSet, int], s: ConfigSet) -> int | None:
-        """Find the specified set in the set of sets, and return the
-        index, or None if it is not found.
-        """
-        s_no_la = self.set_without_lookahead(s)
-        return sets.get(s_no_la)
-
 
 ###############################################################################
 # Formatting
@@ -1063,6 +1094,11 @@ def format_table(generator, table):
 # Examples
 ###############################################################################
 def examples():
+    def dump_grammar(grammar):
+        for name, symbols in grammar:
+            print(f"{name} -> {symbols}")
+        print()
+
     # OK, this is a very simple LR0 grammar.
     print("grammar_simple:")
     grammar_simple = [
@@ -1120,12 +1156,14 @@ def examples():
         assert False
     except ValueError as e:
         print(e)
+        print()
 
     print("grammar_lr0_shift_reduce (SLR1):")
+    dump_grammar(grammar_lr0_shift_reduce)
     gen = GenerateSLR1('E', grammar_lr0_shift_reduce)
     first, epsilon=gen.gen_first((gen.symbol_key['E'],))
-    print(f"First: {str(first)} (epsilon={epsilon})")
-    print(f"Follow: {str(gen.gen_follow(gen.symbol_key['E']))}")
+    print(f"First('E'): {str([gen.alphabet[f] for f in first])} (epsilon={epsilon})")
+    print(f"Follow('E'): {str([gen.alphabet[f] for f in gen.gen_follow(gen.symbol_key['E'])])}")
     table = gen.gen_table()
     print(format_table(gen, table))
     tree = parse(table, ['id', '+', '(', 'id', '[', 'id', ']', ')'], trace=True)
