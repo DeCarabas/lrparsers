@@ -143,6 +143,7 @@ precedence = [
     (Assoc.LEFT, [LESS, GREATER, GREATEREQUAL, LESSEQUAL]),
     (Assoc.LEFT, [PLUS, MINUS]),
     (Assoc.LEFT, [STAR, SLASH]),
+    (Assoc.LEFT, ["PrimaryExpression"]),
     (Assoc.LEFT, [LPAREN]),
     (Assoc.LEFT, [DOT]),
 

@@ -321,6 +321,12 @@ class TableBuilder(object):
         action = ('goto', index)
         self._set_table_action(symbol, action, None)
 
+    def _action_precedence(self, symbol, action, config):
+        if action[0] == 'shift':
+            return self.precedence[symbol]
+        else:
+            return self.precedence[config.name]
+
     def _set_table_action(self, symbol_id: int, action, config: Configuration|None):
         """Set the action for 'symbol' in the table row to 'action'.
 
@@ -335,9 +341,10 @@ class TableBuilder(object):
             assert existing_config is not None
             assert config is not None
 
-            # Maybe we can resolve the conflict with precedence?
-            existing_assoc, existing_prec = self.precedence[existing_config.name]
-            new_assoc, new_prec = self.precedence[config.name]
+            existing_assoc, existing_prec = self._action_precedence(
+                symbol_id, existing, existing_config)
+            new_assoc, new_prec = self._action_precedence(
+                symbol_id, action, config)
 
             if existing_prec > new_prec:
                 # Precedence of the action in the table already wins, do nothing.
