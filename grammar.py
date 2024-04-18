@@ -132,6 +132,9 @@ MATCH = Token("Match")
 EXPORT = Token("Export")
 UNDERSCORE = Token("Underscore")
 NEW = Token("New")
+LSQUARE = Token("LeftBracket")
+RSQUARE = Token("RightBracket")
+
 
 # fmt: off
 precedence = [
@@ -206,7 +209,7 @@ grammar = {
     "ExportStatement": [
         [EXPORT, "ClassDeclaration"],
         [EXPORT, "FunctionDeclaration"],
-        # [EXPORT, "LetStatement"],
+        [EXPORT, "LetStatement"],
         [EXPORT, "ExportList", SEMICOLON],
     ],
     "ExportList": [
@@ -252,35 +255,35 @@ grammar = {
     "Statement": [
         ["FunctionDeclaration"],
         ["LetStatement"],
-        # ["ReturnStatement"],
-        # ["ForStatement"],
+        ["ReturnStatement"],
+        ["ForStatement"],
         ["IfStatement"],
-        # ["WhileStatement"],
-        # ["ExpressionStatement"],
+        ["WhileStatement"],
+        ["ExpressionStatement"],
     ],
 
     "LetStatement": [
         [LET, IDENTIFIER, EQUAL, "Expression", SEMICOLON],
     ],
 
-    # "ReturnStatement": [
-    #     [RETURN, "Expression", SEMICOLON],
-    # ],
+    "ReturnStatement": [
+        [RETURN, "Expression", SEMICOLON],
+    ],
 
-    # "ForStatement": [
-    #     [FOR, "IteratorVariable", IN, "Expression", "Block"],
-    # ],
-    # "IteratorVariable": [[IDENTIFIER]],
+    "ForStatement": [
+        [FOR, "IteratorVariable", IN, "Expression", "Block"],
+    ],
+    "IteratorVariable": [[IDENTIFIER]],
 
     "IfStatement": [["ConditionalExpression"]],
 
-    # "WhileStatement": [
-    #     [WHILE, "Expression", "Block"],
-    # ],
+    "WhileStatement": [
+        [WHILE, "Expression", "Block"],
+    ],
 
-    # "ExpressionStatement": [
-    #     ["Expression", SEMICOLON],
-    # ],
+    "ExpressionStatement": [
+        ["Expression", SEMICOLON],
+    ],
 
     # Expressions
     "Expression": [["AssignmentExpression"]],
@@ -294,7 +297,7 @@ grammar = {
         ["IsExpression"],
     ],
     "IsExpression": [
-        # ["IsExpression", IS, "Pattern"],
+        ["IsExpression", IS, "Pattern"],
         ["AndExpression"],
     ],
     "AndExpression": [
@@ -335,12 +338,12 @@ grammar = {
 
         ["Block"],
         ["ConditionalExpression"],
-    #     ["ListConstructorExpression"],
-    #     ["ObjectConstructorExpression"],
-    #     ["MatchExpression"],
+        ["ListConstructorExpression"],
+        ["ObjectConstructorExpression"],
+        ["MatchExpression"],
 
-    #     ["PrimaryExpression", LPAREN, "ExpressionList", RPAREN],
-    #     ["PrimaryExpression", DOT, IDENTIFIER],
+        ["PrimaryExpression", LPAREN, "ExpressionList", RPAREN],
+        ["PrimaryExpression", DOT, IDENTIFIER],
 
         [LPAREN, "Expression", RPAREN],
     ],
@@ -351,62 +354,65 @@ grammar = {
         [IF, "Expression", "Block", ELSE, "Block"],
     ],
 
-    # "ListConstructorExpression": [
-    #     [LCURLY, "ExpressionList", RCURLY],
-    # ],
+    "ListConstructorExpression": [
+        [LSQUARE, RSQUARE],
+        [LSQUARE, "ExpressionList", RSQUARE],
+    ],
 
-    # "ExpressionList": [
-    #     [],
-    #     ["Expression"],
-    #     ["Expression", COMMA, "ExpressionList"],
-    # ],
+    "ExpressionList": [
+        ["Expression"],
+        ["Expression", COMMA],
+        ["Expression", COMMA, "ExpressionList"],
+    ],
 
-    # # Match Expression
-    # "MatchExpression": [
-    #     [MATCH, "MatchBody"],
-    # ],
-    # "MatchBody": [
-    #     [LCURLY, "MatchArms", RCURLY],
-    # ],
-    # "MatchArms": [
-    #     [],
-    #     ["MatchArm"],
-    #     ["MatchArm", COMMA, "MatchArms"],
-    # ],
-    # "MatchArm": [
-    #     ["Pattern", ARROW, "Expression"],
-    # ],
+    # Match Expression
+    "MatchExpression": [
+        [MATCH, "MatchBody"],
+    ],
+    "MatchBody": [
+        [LCURLY, RCURLY],
+        [LCURLY, "MatchArms", RCURLY],
+    ],
+    "MatchArms": [
+        ["MatchArm"],
+        ["MatchArm", COMMA],
+        ["MatchArm", COMMA, "MatchArms"],
+    ],
+    "MatchArm": [
+        ["Pattern", ARROW, "Expression"],
+    ],
 
-    # # Pattern
-    # "Pattern": [
-    #     ["VariableBinding", "PatternCore", AND, "AndExpression"],
-    #     ["VariableBinding", "PatternCore"],
-    #     ["PatternCore", AND, "AndExpression"],
-    #     ["PatternCore"],
-    # ],
-    # "PatternCore": [
-    #     ["TypeExpression"],
-    #     ["WildcardPattern"],
-    # ],
-    # "WildcardPattern": [[UNDERSCORE]],
-    # "VariableBinding": [[IDENTIFIER, COLON]],
+    # Pattern
+    "Pattern": [
+        ["VariableBinding", "PatternCore", AND, "AndExpression"],
+        ["VariableBinding", "PatternCore"],
+        ["PatternCore", AND, "AndExpression"],
+        ["PatternCore"],
+    ],
+    "PatternCore": [
+        ["TypeExpression"],
+        ["WildcardPattern"],
+    ],
+    "WildcardPattern": [[UNDERSCORE]],
+    "VariableBinding": [[IDENTIFIER, COLON]],
 
-    # # Object Constructor
-    # "ObjectConstructorExpression": [
-    #     [NEW, "TypeIdentifier", "FieldList"],
-    # ],
-    # "FieldList": [
-    #     [LCURLY, "FieldValues", RCURLY],
-    # ],
-    # "FieldValues": [
-    #     [],
-    #     ["FieldValue"],
-    #     ["FieldValue", COMMA, "FieldValues"],
-    # ],
-    # "FieldValue": [
-    #     [IDENTIFIER],
-    #     [IDENTIFIER, COLON, "Expression"],
-    # ],
+    # Object Constructor
+    "ObjectConstructorExpression": [
+        [NEW, "TypeIdentifier", "FieldList"],
+    ],
+    "FieldList": [
+        [LCURLY, RCURLY],
+        [LCURLY, "FieldValues", RCURLY],
+    ],
+    "FieldValues": [
+        ["FieldValue"],
+        ["FieldValue", COMMA],
+        ["FieldValue", COMMA, "FieldValues"],
+    ],
+    "FieldValue": [
+        [IDENTIFIER],
+        [IDENTIFIER, COLON, "Expression"],
+    ],
 }
 # fmt: on
 
