@@ -10,6 +10,7 @@ It also supports precedence.
 import collections
 import dataclasses
 import enum
+import functools
 import typing
 
 
@@ -516,7 +517,7 @@ class GenerateLR0(object):
         self.start_symbol = start_symbol
         self.end_symbol = end_symbol
 
-
+    @functools.cache
     def gen_closure_next(self, config: Configuration):
         """Return the next set of configurations in the closure for
         config.
@@ -547,14 +548,20 @@ class GenerateLR0(object):
         """
         closure = set()
         pending = list(seeds)
+        pending_next = []
         while len(pending) > 0:
-            config = pending.pop()
-            if config in closure:
-                continue
+            for config in pending:
+                if config in closure:
+                    continue
 
-            closure.add(config)
-            for next_config in self.gen_closure_next(config):
-                pending.append(next_config)
+                closure.add(config)
+                for next_config in self.gen_closure_next(config):
+                    pending_next.append(next_config)
+
+            temp = pending
+            pending = pending_next
+            pending_next = temp
+            pending_next.clear()
 
         return tuple(sorted(closure)) # TODO: Why tuple?
 
@@ -596,14 +603,20 @@ class GenerateLR0(object):
 
         successors = []
         pending = [config_set]
+        pending_next = []
         while len(pending) > 0:
-            config_set = pending.pop()
+            for config_set in pending:
+                id, is_new = result.register_config_set(config_set)
+                if is_new:
+                    for symbol, successor in self.gen_all_successors(config_set):
+                        successors.append((id,symbol,successor))
+                        pending_next.append(successor)
 
-            id, is_new = result.register_config_set(config_set)
-            if is_new:
-                for symbol, successor in self.gen_all_successors(config_set):
-                    successors.append((id,symbol,successor))
-                    pending.append(successor)
+
+            temp = pending
+            pending = pending_next
+            pending_next = temp
+            pending_next.clear()
 
         for id,symbol,successor in successors:
             result.add_successor(id, symbol, result.config_set_key[successor])
@@ -940,6 +953,7 @@ class GenerateLR1(GenerateSLR1):
         In an LR1 parser, this is the lookahead of the configuration."""
         return config.lookahead
 
+    @functools.cache
     def gen_closure_next(self, config: Configuration):
         """Return the next set of configurations in the closure for
         config.
@@ -967,7 +981,7 @@ class GenerateLR1(GenerateSLR1):
                 lookahead = tuple(sorted(lookahead))
                 next.append(Configuration.from_rule(config_next, rule, lookahead=lookahead))
 
-            return tuple(next)
+            return tuple(sorted(next))
 
     def gen_all_sets(self):
         """Generate all of the configuration sets for the grammar.
