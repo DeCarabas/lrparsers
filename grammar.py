@@ -1,90 +1,5 @@
-import parser_faster
-import sys
-import typing
-
-from parser_faster import Assoc
-
-class Token:
-    value: str
-
-    def __init__(self, value):
-        self.value = sys.intern(value)
-
-Symbol = Token | str
-
-def desugar(
-    grammar: dict[str, list[list[Symbol]]],
-    precedence: list[typing.Tuple[Assoc, list[Symbol]]],
-):
-    nonterminal_refs = set()
-    nonterminals = set()
-    terminals = set()
-
-    result: list[typing.Tuple[str, list[str]]] = []
-    for (k, v) in grammar.items():
-        nonterminals.add(k)
-
-        for rule in v:
-            assert isinstance(rule, list)
-            result_rule: list[str] = []
-            for symbol in rule:
-                if isinstance(symbol, Token):
-                    result_rule.append(symbol.value)
-                    terminals.add(symbol.value)
-                else:
-                    result_rule.append(symbol)
-                    nonterminal_refs.add(symbol)
-
-            result.append((k, result_rule))
-
-    unknown_rules = nonterminal_refs - nonterminals
-    if len(unknown_rules) > 0:
-        undefined = "\n  ".join(unknown_rules)
-        raise Exception(f"The following rules are not defined:\n  {undefined}")
-
-    overlap_rules = nonterminals & terminals
-    if len(overlap_rules) > 0:
-        overlap = "\n  ".join(overlap_rules)
-        raise Exception(f"The following symbols are both tokens and rules:\n  {overlap}")
-
-    result_precedence = {
-        (symbol.value if isinstance(symbol, Token) else symbol):(associativity, precedence + 1)
-        for precedence, (associativity, symbols) in enumerate(precedence)
-        for symbol in symbols
-    }
-
-    return result, result_precedence
-
-def dump_yacc(grammar):
-    tokens = set()
-    for rules in grammar.values():
-        for rule in rules:
-            for symbol in rule:
-                if symbol.startswith("token:"):
-                    symbol = symbol[6:].upper()
-                    tokens.add(symbol)
-    for token in sorted(tokens):
-        print(f"%token {token}")
-
-    print()
-    print("%%")
-
-    for name, rules in grammar.items():
-        print(f"{name} : ", end='');
-        for i,rule in enumerate(rules):
-            if i != 0:
-                print(f"{' ' * len(name)} | ", end='')
-
-            parts = []
-            for symbol in rule:
-                if symbol.startswith("token:"):
-                    symbol = symbol[6:].upper()
-                parts.append(symbol)
-            print(' '.join(parts))
-        print()
-
-    print("%%")
-
+# This is an example grammar.
+from parser import Assoc, Grammar, Nothing, Token, rule, seq
 
 ARROW = Token("Arrow")
 AS = Token("As")
@@ -136,290 +51,339 @@ LSQUARE = Token("LeftBracket")
 RSQUARE = Token("RightBracket")
 
 
-# fmt: off
-precedence = [
-    (Assoc.RIGHT, [EQUAL]),
-    (Assoc.LEFT, [OR]),
-    (Assoc.LEFT, [IS]),
-    (Assoc.LEFT, [AND]),
-    (Assoc.LEFT, [EQUALEQUAL, BANGEQUAL]),
-    (Assoc.LEFT, [LESS, GREATER, GREATEREQUAL, LESSEQUAL]),
-    (Assoc.LEFT, [PLUS, MINUS]),
-    (Assoc.LEFT, [STAR, SLASH]),
-    (Assoc.LEFT, ["PrimaryExpression"]),
-    (Assoc.LEFT, [LPAREN]),
-    (Assoc.LEFT, [DOT]),
+class FineGrammar(Grammar):
+    def __init__(self):
+        super().__init__(
+            precedence=[
+                (Assoc.RIGHT, [EQUAL]),
+                (Assoc.LEFT, [OR]),
+                (Assoc.LEFT, [IS]),
+                (Assoc.LEFT, [AND]),
+                (Assoc.LEFT, [EQUALEQUAL, BANGEQUAL]),
+                (Assoc.LEFT, [LESS, GREATER, GREATEREQUAL, LESSEQUAL]),
+                (Assoc.LEFT, [PLUS, MINUS]),
+                (Assoc.LEFT, [STAR, SLASH]),
+                (Assoc.LEFT, [self.primary_expression]),
+                (Assoc.LEFT, [LPAREN]),
+                (Assoc.LEFT, [DOT]),
+                #
+                # If there's a confusion about whether to make an IF
+                # statement or an expression, prefer the statement.
+                #
+                (Assoc.NONE, [self.if_statement]),
+            ]
+        )
 
-    # If there's a confusion about whether to make an IF statement or an
-    # expression, prefer the statement.
-    (Assoc.NONE, ["IfStatement"]),
-]
+    @rule
+    def file(self):
+        return self.file_statement_list
 
-grammar = {
-    "File": [
-        ["FileStatementList"],
-    ],
-    "FileStatementList": [
-        ["FileStatement"],
-        ["FileStatement", "FileStatementList"],
-    ],
-    "FileStatement": [
-        ["ImportStatement"],
-        ["ClassDeclaration"],
-        ["ExportStatement"],
-        ["Statement"],
-    ],
+    @rule
+    def file_statement_list(self):
+        return self.file_statement | (self.file_statement_list + self.file_statement)
 
-    "ImportStatement": [
-        [IMPORT, STRING, AS, IDENTIFIER, SEMICOLON],
-    ],
+    @rule
+    def file_statement(self):
+        return (
+            self.import_statement | self.class_declaration | self.export_statement | self.statement
+        )
 
-    # Classes
-    "ClassDeclaration": [
-        [CLASS, IDENTIFIER, "ClassBody"],
-    ],
-    "ClassBody": [
-        [LCURLY, RCURLY],
-        [LCURLY, "ClassMembers", RCURLY],
-    ],
-    "ClassMembers": [
-        ["ClassMember"],
-        ["ClassMembers", "ClassMember"],
-    ],
-    "ClassMember": [
-        ["FieldDeclaration"],
-        ["FunctionDeclaration"],
-    ],
-    "FieldDeclaration": [
-        [IDENTIFIER, COLON, "TypeExpression", SEMICOLON],
-    ],
+    @rule
+    def import_statement(self):
+        return seq(IMPORT, STRING, AS, IDENTIFIER, SEMICOLON)
+
+    @rule
+    def class_declaration(self):
+        return seq(CLASS, IDENTIFIER, self.class_body)
+
+    @rule
+    def class_body(self):
+        return seq(LCURLY, RCURLY) | seq(LCURLY, self.class_members, RCURLY)
+
+    @rule
+    def class_members(self):
+        return self.class_member | seq(self.class_members, self.class_member)
+
+    @rule
+    def class_member(self):
+        return self.field_declaration | self.function_declaration
+
+    @rule
+    def field_declaration(self):
+        return seq(IDENTIFIER, COLON, self.type_expression, SEMICOLON)
 
     # Types
-    "TypeExpression": [
-        ["AlternateType"],
-        ["TypeIdentifier"],
-    ],
-    "AlternateType": [
-        ["TypeExpression", BAR, "TypeIdentifier"],
-    ],
-    "TypeIdentifier": [
-        [IDENTIFIER],
-    ],
+    @rule
+    def type_expression(self):
+        return self.alternate_type | self.type_identifier
 
-    "ExportStatement": [
-        [EXPORT, "ClassDeclaration"],
-        [EXPORT, "FunctionDeclaration"],
-        [EXPORT, "LetStatement"],
-        [EXPORT, "ExportList", SEMICOLON],
-    ],
-    "ExportList": [
-        [],
-        [IDENTIFIER],
-        [IDENTIFIER, COMMA, "ExportList"],
-    ],
+    @rule
+    def alternate_type(self):
+        return seq(self.type_expression, BAR, self.type_identifier)
+
+    @rule
+    def type_identifier(self):
+        return IDENTIFIER
+
+    @rule
+    def export_statement(self):
+        return (
+            seq(EXPORT, self.class_declaration)
+            | seq(EXPORT, self.function_declaration)
+            | seq(EXPORT, self.let_statement)
+            | seq(EXPORT, self.export_list, SEMICOLON)
+        )
+
+    @rule
+    def export_list(self):
+        return Nothing | IDENTIFIER | seq(IDENTIFIER, COMMA, self.export_list)
 
     # Functions
-    "FunctionDeclaration": [
-        [FUN, IDENTIFIER, "FunctionParameters", "Block"],
-        [FUN, IDENTIFIER, "FunctionParameters", ARROW, "TypeExpression", "Block"],
-    ],
-    "FunctionParameters": [
-        [LPAREN, RPAREN],
-        [LPAREN, "FirstParameter", RPAREN],
-        [LPAREN, "FirstParameter", COMMA, "ParameterList", RPAREN],
-    ],
-    "FirstParameter": [
-        [SELF],
-        ["Parameter"],
-    ],
-    "ParameterList": [
-        [],
-        ["Parameter"],
-        ["Parameter", COMMA, "ParameterList"],
-    ],
-    "Parameter": [
-        [IDENTIFIER, COLON, "TypeExpression"],
-    ],
+    @rule
+    def function_declaration(self):
+        return seq(FUN, IDENTIFIER, self.function_parameters, self.block) | seq(
+            FUN, IDENTIFIER, self.function_parameters, ARROW, self.type_expression, self.block
+        )
+
+    @rule
+    def function_parameters(self):
+        return (
+            seq(LPAREN, RPAREN)
+            | seq(LPAREN, self.first_parameter, RPAREN)
+            | seq(LPAREN, self.first_parameter, COMMA, self.parameter_list, RPAREN)
+        )
+
+    @rule
+    def first_parameter(self):
+        return SELF | self.parameter
+
+    @rule
+    def parameter_list(self):
+        return Nothing | self.parameter | seq(self.parameter, COMMA, self.parameter_list)
+
+    @rule
+    def parameter(self):
+        return seq(IDENTIFIER, COLON, self.type_expression)
 
     # Block
-    "Block": [
-        [LCURLY, RCURLY],
-        [LCURLY, "StatementList", RCURLY],
-        [LCURLY, "StatementList", "Expression", RCURLY],
-    ],
-    "StatementList": [
-        ["Statement"],
-        ["StatementList", "Statement"],
-    ],
+    @rule
+    def block(self):
+        return (
+            seq(LCURLY, RCURLY)
+            | seq(LCURLY, self.statement_list, RCURLY)
+            | seq(LCURLY, self.statement_list, self.expression, RCURLY)
+        )
 
-    "Statement": [
-        ["FunctionDeclaration"],
-        ["LetStatement"],
-        ["ReturnStatement"],
-        ["ForStatement"],
-        ["IfStatement"],
-        ["WhileStatement"],
-        ["ExpressionStatement"],
-    ],
+    @rule
+    def statement_list(self):
+        return self.statement | seq(self.statement_list, self.statement)
 
-    "LetStatement": [
-        [LET, IDENTIFIER, EQUAL, "Expression", SEMICOLON],
-    ],
+    @rule
+    def statement(self):
+        return (
+            self.function_declaration
+            | self.let_statement
+            | self.return_statement
+            | self.for_statement
+            | self.if_statement
+            | self.while_statement
+            | self.expression_statement
+        )
 
-    "ReturnStatement": [
-        [RETURN, "Expression", SEMICOLON],
-    ],
+    @rule
+    def let_statement(self):
+        return seq(LET, IDENTIFIER, EQUAL, self.expression, SEMICOLON)
 
-    "ForStatement": [
-        [FOR, "IteratorVariable", IN, "Expression", "Block"],
-    ],
-    "IteratorVariable": [[IDENTIFIER]],
+    @rule
+    def return_statement(self):
+        return seq(RETURN, self.expression, SEMICOLON)
 
-    "IfStatement": [["ConditionalExpression"]],
+    @rule
+    def for_statement(self):
+        return seq(FOR, self.iterator_variable, IN, self.expression, self.block)
 
-    "WhileStatement": [
-        [WHILE, "Expression", "Block"],
-    ],
+    @rule
+    def iterator_variable(self):
+        return IDENTIFIER
 
-    "ExpressionStatement": [
-        ["Expression", SEMICOLON],
-    ],
+    @rule
+    def if_statement(self):
+        return self.conditional_expression
+
+    @rule
+    def while_statement(self):
+        return seq(WHILE, self.expression, self.block)
+
+    @rule
+    def expression_statement(self):
+        return seq(self.expression, SEMICOLON)
 
     # Expressions
-    "Expression": [["AssignmentExpression"]],
+    @rule
+    def expression(self):
+        return self.assignment_expression
 
-    "AssignmentExpression": [
-        ["OrExpression", EQUAL, "AssignmentExpression"],
-        ["OrExpression"],
-    ],
-    "OrExpression": [
-        ["OrExpression", OR, "IsExpression"],
-        ["IsExpression"],
-    ],
-    "IsExpression": [
-        ["IsExpression", IS, "Pattern"],
-        ["AndExpression"],
-    ],
-    "AndExpression": [
-        ["AndExpression", AND, "EqualityExpression"],
-        ["EqualityExpression"],
-    ],
-    "EqualityExpression": [
-        ["EqualityExpression", EQUALEQUAL, "RelationExpression"],
-        ["EqualityExpression", BANGEQUAL, "RelationExpression"],
-        ["RelationExpression"],
-    ],
-    "RelationExpression": [
-        ["RelationExpression", LESS, "AdditiveExpression"],
-        ["RelationExpression", LESSEQUAL, "AdditiveExpression"],
-        ["RelationExpression", GREATER, "AdditiveExpression"],
-        ["RelationExpression", GREATEREQUAL, "AdditiveExpression"],
-        ["AdditiveExpression"],
-    ],
-    "AdditiveExpression": [
-        ["AdditiveExpression", PLUS, "MultiplicationExpression"],
-        ["AdditiveExpression", MINUS, "MultiplicationExpression"],
-        ["MultiplicationExpression"],
-    ],
-    "MultiplicationExpression": [
-        ["MultiplicationExpression", STAR, "PrimaryExpression"],
-        ["MultiplicationExpression", SLASH, "PrimaryExpression"],
-        ["PrimaryExpression"],
-    ],
-    "PrimaryExpression": [
-        [IDENTIFIER],
-        [SELF],
-        [NUMBER],
-        [STRING],
-        [TRUE],
-        [FALSE],
-        [BANG, "PrimaryExpression"],
-        [MINUS, "PrimaryExpression"],
+    @rule
+    def assignment_expression(self):
+        return seq(self.or_expression, EQUAL, self.assignment_expression) | self.or_expression
 
-        ["Block"],
-        ["ConditionalExpression"],
-        ["ListConstructorExpression"],
-        ["ObjectConstructorExpression"],
-        ["MatchExpression"],
+    @rule
+    def or_expression(self):
+        return seq(self.or_expression, OR, self.is_expression) | self.is_expression
 
-        ["PrimaryExpression", LPAREN, "ExpressionList", RPAREN],
-        ["PrimaryExpression", DOT, IDENTIFIER],
+    @rule
+    def is_expression(self):
+        return seq(self.is_expression, IS, self.pattern) | self.and_expression
 
-        [LPAREN, "Expression", RPAREN],
-    ],
+    @rule
+    def and_expression(self):
+        return seq(self.and_expression, AND, self.equality_expression) | self.equality_expression
 
-    "ConditionalExpression": [
-        [IF, "Expression", "Block"],
-        [IF, "Expression", "Block", ELSE, "ConditionalExpression"],
-        [IF, "Expression", "Block", ELSE, "Block"],
-    ],
+    @rule
+    def equality_expression(self):
+        return (
+            seq(self.equality_expression, EQUALEQUAL, self.relation_expression)
+            | seq(self.equality_expression, BANGEQUAL, self.relation_expression)
+            | self.relation_expression
+        )
 
-    "ListConstructorExpression": [
-        [LSQUARE, RSQUARE],
-        [LSQUARE, "ExpressionList", RSQUARE],
-    ],
+    @rule
+    def relation_expression(self):
+        return (
+            seq(self.relation_expression, LESS, self.additive_expression)
+            | seq(self.relation_expression, LESSEQUAL, self.additive_expression)
+            | seq(self.relation_expression, GREATER, self.additive_expression)
+            | seq(self.relation_expression, GREATEREQUAL, self.additive_expression)
+        )
 
-    "ExpressionList": [
-        ["Expression"],
-        ["Expression", COMMA],
-        ["Expression", COMMA, "ExpressionList"],
-    ],
+    @rule
+    def additive_expression(self):
+        return (
+            seq(self.additive_expression, PLUS, self.multiplication_expression)
+            | seq(self.additive_expression, MINUS, self.multiplication_expression)
+            | self.multiplication_expression
+        )
 
-    # Match Expression
-    "MatchExpression": [
-        [MATCH, "MatchBody"],
-    ],
-    "MatchBody": [
-        [LCURLY, RCURLY],
-        [LCURLY, "MatchArms", RCURLY],
-    ],
-    "MatchArms": [
-        ["MatchArm"],
-        ["MatchArm", COMMA],
-        ["MatchArm", COMMA, "MatchArms"],
-    ],
-    "MatchArm": [
-        ["Pattern", ARROW, "Expression"],
-    ],
+    @rule
+    def multiplication_expression(self):
+        return (
+            seq(self.multiplication_expression, STAR, self.primary_expression)
+            | seq(self.multiplication_expression, SLASH, self.primary_expression)
+            | self.primary_expression
+        )
 
-    # Pattern
-    "Pattern": [
-        ["VariableBinding", "PatternCore", AND, "AndExpression"],
-        ["VariableBinding", "PatternCore"],
-        ["PatternCore", AND, "AndExpression"],
-        ["PatternCore"],
-    ],
-    "PatternCore": [
-        ["TypeExpression"],
-        ["WildcardPattern"],
-    ],
-    "WildcardPattern": [[UNDERSCORE]],
-    "VariableBinding": [[IDENTIFIER, COLON]],
+    @rule
+    def primary_expression(self):
+        return (
+            IDENTIFIER
+            | SELF
+            | NUMBER
+            | STRING
+            | TRUE
+            | FALSE
+            | seq(BANG, self.primary_expression)
+            | seq(MINUS, self.primary_expression)
+            | self.block
+            | self.conditional_expression
+            | self.list_constructor_expression
+            | self.object_constructor_expression
+            | self.match_expression
+            | seq(self.primary_expression, LPAREN, self.expression_list, RPAREN)
+            | seq(self.primary_expression, DOT, IDENTIFIER)
+            | seq(LPAREN, self.expression, RPAREN)
+        )
 
-    # Object Constructor
-    "ObjectConstructorExpression": [
-        [NEW, "TypeIdentifier", "FieldList"],
-    ],
-    "FieldList": [
-        [LCURLY, RCURLY],
-        [LCURLY, "FieldValues", RCURLY],
-    ],
-    "FieldValues": [
-        ["FieldValue"],
-        ["FieldValue", COMMA],
-        ["FieldValue", COMMA, "FieldValues"],
-    ],
-    "FieldValue": [
-        [IDENTIFIER],
-        [IDENTIFIER, COLON, "Expression"],
-    ],
-}
-# fmt: on
+    @rule
+    def conditional_expression(self):
+        return (
+            seq(IF, self.expression, self.block)
+            | seq(IF, self.expression, self.block, ELSE, self.conditional_expression)
+            | seq(IF, self.expression, self.block, ELSE, self.block)
+        )
 
-# dump_yacc(grammar)
-grammar, precedence = desugar(grammar, precedence)
-gen = parser_faster.GenerateLR1("File", grammar, precedence=precedence)
-gen.gen_table()
+    @rule
+    def list_constructor_expression(self):
+        return seq(LSQUARE, RSQUARE) | seq(LSQUARE, self.expression_list, RSQUARE)
+
+    @rule
+    def expression_list(self):
+        return (
+            self.expression
+            | seq(self.expression, COMMA)
+            | seq(self.expression, COMMA, self.expression_list)
+        )
+
+    @rule
+    def match_expression(self):
+        return seq(MATCH, self.match_body)
+
+    @rule
+    def match_body(self):
+        return seq(LCURLY, RCURLY) | seq(LCURLY, self.match_arms, RCURLY)
+
+    @rule
+    def match_arms(self):
+        return (
+            self.match_arm
+            | seq(self.match_arm, COMMA)
+            | seq(self.match_arm, COMMA, self.match_arms)
+        )
+
+    @rule
+    def match_arm(self):
+        return seq(self.pattern, ARROW, self.expression)
+
+    @rule
+    def pattern(self):
+        return (
+            seq(self.variable_binding, self.pattern_core, AND, self.and_expression)
+            | seq(self.variable_binding, self.pattern_core)
+            | seq(self.pattern_core, AND, self.and_expression)
+            | self.pattern_core
+        )
+
+    @rule
+    def pattern_core(self):
+        return self.type_expression | self.wildcard_pattern
+
+    @rule
+    def wildcard_pattern(self):
+        return UNDERSCORE
+
+    @rule
+    def variable_binding(self):
+        return seq(IDENTIFIER, COLON)
+
+    @rule
+    def object_constructor_expression(self):
+        return seq(NEW, self.type_identifier, self.field_list)
+
+    @rule
+    def field_list(self):
+        return seq(LCURLY, RCURLY) | seq(LCURLY, self.field_values, RCURLY)
+
+    @rule
+    def field_values(self):
+        return (
+            self.field_value
+            | seq(self.field_value, COMMA)
+            | seq(self.field_value, COMMA, self.field_values)
+        )
+
+    @rule
+    def field_value(self):
+        return IDENTIFIER | seq(IDENTIFIER, COLON, self.expression)
+
+
+grammar = FineGrammar()
+table = grammar.build_table(start="file")
+
+print(f"{len(table)} states")
+
+average_entries = sum(len(row) for row in table) / len(table)
+max_entries = max(len(row) for row in table)
+print(f"{average_entries} average, {max_entries} max")
+
 # print(parser_faster.format_table(gen, table))
 # print()
 # tree = parse(table, ["id", "+", "(", "id", "[", "id", "]", ")"])

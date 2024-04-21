@@ -1,0 +1,13 @@
+[project]
+name = "lrparsers"
+descrption = "a small LR parser generator library"
+authors = [
+  {name = "John Doty", email = "john@d0ty.me"},
+]
+classifiers = [
+  "Private :: Do Not Upload", # Probably.
+  "License :: OSI Approved :: MIT License",
+]
+
+[tool.black]
+line-length=100
