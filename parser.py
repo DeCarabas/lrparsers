@@ -1499,7 +1499,7 @@ class Token(Rule):
     def __init__(self, value):
         self.value = sys.intern(value)
 
-    def flatten(self) -> typing.Generator[list[str], None, None]:
+    def flatten(self) -> typing.Generator[list["str | Token"], None, None]:
         # We are just ourselves when flattened.
         yield [self]
 
@@ -1546,7 +1546,7 @@ class AlternativeRule(Rule):
         self.left = left
         self.right = right
 
-    def flatten(self) -> typing.Generator[list[str], None, None]:
+    def flatten(self) -> typing.Generator[list[str | Token], None, None]:
         # All the things from the left of the alternative, then all the things
         # from the right, never intermingled.
         yield from self.left.flatten()
@@ -1562,7 +1562,7 @@ class SequenceRule(Rule):
         self.first = first
         self.second = second
 
-    def flatten(self) -> typing.Generator[list[str], None, None]:
+    def flatten(self) -> typing.Generator[list[str | Token], None, None]:
         # All the things in the prefix....
         for first in self.first.flatten():
             # ...potentially followed by all the things in the suffix.
@@ -1575,7 +1575,7 @@ class NothingRule(Rule):
     these, you're probably better off just using the singleton `Nothing`.
     """
 
-    def flatten(self) -> typing.Generator[list[str], None, None]:
+    def flatten(self) -> typing.Generator[list[str | Token], None, None]:
         # It's quiet in here.
         yield []
 
@@ -1583,7 +1583,7 @@ class NothingRule(Rule):
 Nothing = NothingRule()
 
 
-def seq(*args: list[Rule]) -> Rule:
+def seq(*args: Rule) -> Rule:
     """A rule that matches a sequence of rules.
 
     (A helper function that combines its arguments into nested sequences.)
@@ -1594,17 +1594,15 @@ def seq(*args: list[Rule]) -> Rule:
     return result
 
 
-@typing.overload
-def rule(name: None | str = None) -> typing.Callable[[typing.Callable], Rule]: ...
+# @typing.overload
+# def rule(f: None | str = None) -> typing.Callable[[typing.Callable], Rule]: ...
 
 
-@typing.overload
-def rule(fn: typing.Callable) -> Rule: ...
+# @typing.overload
+# def rule(f: typing.Callable) -> Rule: ...
 
 
-def rule(
-    name_or_fn: None | str | typing.Callable = None,
-) -> Rule | typing.Callable[[typing.Callable], Rule]:
+def rule(f: typing.Callable) -> Rule:
     """The decorator that marks a method in a Grammar object as a nonterminal
     rule.
 
@@ -1612,16 +1610,11 @@ def rule(
     If called with one argument, that argument is a name that overrides the name
     of the nonterminal, which defaults to the name of the function.
     """
+    name = f.__name__
+    return NonTerminal(f, name)
 
-    def _rule(callable):
-        return NonTerminal(callable, name)
 
-    if callable(name_or_fn):
-        name = name_or_fn.__name__
-        return _rule(name_or_fn)
-    else:
-        name = name_or_fn
-        return _rule
+PrecedenceList = list[typing.Tuple[Assoc, list[Rule]]]
 
 
 class Grammar:
@@ -1650,12 +1643,13 @@ class Grammar:
     Not very exciting, perhaps, but it's something.
     """
 
-    def __init__(self, precedence: list[typing.Tuple[Assoc, list[Token | NonTerminal]]] = None):
+    def __init__(self, precedence: PrecedenceList | None = None):
         if precedence is None:
             precedence = getattr(self, "precedence", [])
+        assert precedence is not None
 
         precedence_table = {}
-        for precedence, (associativity, symbols) in enumerate(precedence):
+        for prec, (associativity, symbols) in enumerate(precedence):
             for symbol in symbols:
                 if isinstance(symbol, Token):
                     key = symbol.value
@@ -1664,7 +1658,7 @@ class Grammar:
                 else:
                     raise ValueError(f"{symbol} must be either a Token or a NonTerminal")
 
-                precedence_table[key] = (associativity, precedence + 1)
+                precedence_table[key] = (associativity, prec + 1)
 
         self._precedence = precedence_table
 
