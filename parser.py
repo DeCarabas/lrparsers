@@ -1723,7 +1723,7 @@ class Grammar:
 
         return grammar
 
-    def build_table(self, start: str, generator=GenerateLALR):
+    def build_table(self, start: str, generator=GenerateLR1):
         """Construct a parse table for this grammar, starting at the named
         nonterminal rule.
         """

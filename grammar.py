@@ -1,4 +1,6 @@
 # This is an example grammar.
+import re
+
 from parser import Assoc, Grammar, Nothing, Token, rule, seq
 
 ARROW = Token("Arrow")
@@ -119,7 +121,7 @@ class FineGrammar(Grammar):
 
     @rule
     def alternate_type(self):
-        return seq(self.type_expression, BAR, self.type_identifier)
+        return seq(self.type_expression, OR, self.type_identifier)
 
     @rule
     def type_identifier(self):
@@ -170,6 +172,7 @@ class FineGrammar(Grammar):
     def block(self):
         return (
             seq(LCURLY, RCURLY)
+            | seq(LCURLY, self.expression, RCURLY)
             | seq(LCURLY, self.statement_list, RCURLY)
             | seq(LCURLY, self.statement_list, self.expression, RCURLY)
         )
@@ -196,7 +199,7 @@ class FineGrammar(Grammar):
 
     @rule
     def return_statement(self):
-        return seq(RETURN, self.expression, SEMICOLON)
+        return seq(RETURN, self.expression, SEMICOLON) | seq(RETURN, SEMICOLON)
 
     @rule
     def for_statement(self):
@@ -254,6 +257,7 @@ class FineGrammar(Grammar):
             | seq(self.relation_expression, LESSEQUAL, self.additive_expression)
             | seq(self.relation_expression, GREATER, self.additive_expression)
             | seq(self.relation_expression, GREATEREQUAL, self.additive_expression)
+            | self.additive_expression
         )
 
     @rule
@@ -288,6 +292,7 @@ class FineGrammar(Grammar):
             | self.list_constructor_expression
             | self.object_constructor_expression
             | self.match_expression
+            | seq(self.primary_expression, LPAREN, RPAREN)
             | seq(self.primary_expression, LPAREN, self.expression_list, RPAREN)
             | seq(self.primary_expression, DOT, IDENTIFIER)
             | seq(LPAREN, self.expression, RPAREN)
@@ -315,7 +320,7 @@ class FineGrammar(Grammar):
 
     @rule
     def match_expression(self):
-        return seq(MATCH, self.match_body)
+        return seq(MATCH, self.expression, self.match_body)
 
     @rule
     def match_body(self):
@@ -375,15 +380,187 @@ class FineGrammar(Grammar):
         return IDENTIFIER | seq(IDENTIFIER, COLON, self.expression)
 
 
-grammar = FineGrammar()
-table = grammar.build_table(start="file")
+# -----------------------------------------------------------------------------
+# DORKY LEXER
+# -----------------------------------------------------------------------------
+NUMBER_RE = re.compile("[0-9]+(\\.[0-9]*([eE][-+]?[0-9]+)?)?")
+IDENTIFIER_RE = re.compile("[_A-Za-z][_A-Za-z0-9]*")
+KEYWORD_TABLE = {
+    "_": UNDERSCORE,
+    "and": AND,
+    "as": AS,
+    "class": CLASS,
+    "else": ELSE,
+    "export": EXPORT,
+    "false": FALSE,
+    "for": FOR,
+    "fun": FUN,
+    "if": IF,
+    "import": IMPORT,
+    "in": IN,
+    "is": IS,
+    "let": LET,
+    "match": MATCH,
+    "new": NEW,
+    "or": OR,
+    "return": RETURN,
+    "self": SELF,
+    "true": TRUE,
+    "while": WHILE,
+}
 
-print(f"{len(table)} states")
 
-average_entries = sum(len(row) for row in table) / len(table)
-max_entries = max(len(row) for row in table)
-print(f"{average_entries} average, {max_entries} max")
+def tokenize(src: str):
+    pos = 0
+    while pos < len(src):
+        ch = src[pos]
+        if ch.isspace():
+            pos += 1
+            continue
 
-# print(parser_faster.format_table(gen, table))
-# print()
-# tree = parse(table, ["id", "+", "(", "id", "[", "id", "]", ")"])
+        token = None
+        if ch == "-":
+            if src[pos : pos + 2] == "->":
+                token = (ARROW, pos, 2)
+            else:
+                token = (MINUS, pos, 1)
+
+        elif ch == "|":
+            token = (BAR, pos, 1)
+
+        elif ch == ":":
+            token = (COLON, pos, 1)
+
+        elif ch == "{":
+            token = (LCURLY, pos, 1)
+
+        elif ch == "}":
+            token = (RCURLY, pos, 1)
+
+        elif ch == ";":
+            token = (SEMICOLON, pos, 1)
+
+        elif ch == "=":
+            if src[pos : pos + 2] == "==":
+                token = (EQUALEQUAL, pos, 2)
+            else:
+                token = (EQUAL, pos, 1)
+
+        elif ch == "(":
+            token = (LPAREN, pos, 1)
+
+        elif ch == ")":
+            token = (RPAREN, pos, 1)
+
+        elif ch == ",":
+            token = (COMMA, pos, 1)
+
+        elif ch == "!":
+            if src[pos : pos + 2] == "!=":
+                token = (BANGEQUAL, pos, 2)
+            else:
+                token = (BANG, pos, 1)
+
+        elif ch == "<":
+            if src[pos : pos + 2] == "<=":
+                token = (LESSEQUAL, pos, 2)
+            else:
+                token = (LESS, pos, 1)
+
+        elif ch == ">":
+            if src[pos : pos + 2] == ">=":
+                token = (GREATEREQUAL, pos, 2)
+            else:
+                token = (GREATER, pos, 1)
+
+        elif ch == "+":
+            token = (PLUS, pos, 1)
+
+        elif ch == "*":
+            token = (STAR, pos, 1)
+
+        elif ch == "/":
+            if src[pos : pos + 2] == "//":
+                while pos < len(src) and src[pos] != "\n":
+                    pos = pos + 1
+                continue
+
+            token = (SLASH, pos, 1)
+
+        elif ch == ".":
+            token = (DOT, pos, 1)
+
+        elif ch == "[":
+            token = (LSQUARE, pos, 1)
+
+        elif ch == "]":
+            token = (RSQUARE, pos, 1)
+
+        elif ch == '"' or ch == "'":
+            end = pos + 1
+            while end < len(src) and src[end] != ch:
+                if src[end] == "\\":
+                    end += 1
+                end += 1
+            if end == len(src):
+                raise Exception(f"Unterminated string constant at {pos}")
+            end += 1
+            token = (STRING, pos, end - pos)
+
+        else:
+            number_match = NUMBER_RE.match(src, pos)
+            if number_match:
+                token = (NUMBER, pos, number_match.end() - pos)
+            else:
+                id_match = IDENTIFIER_RE.match(src, pos)
+                if id_match:
+                    fragment = src[pos : id_match.end()]
+                    keyword = KEYWORD_TABLE.get(fragment)
+                    if keyword:
+                        token = (keyword, pos, len(fragment))
+                    else:
+                        token = (IDENTIFIER, pos, len(fragment))
+
+        if token is None:
+            raise Exception("Token error")
+        yield token
+        pos += token[2]
+
+
+import bisect
+
+
+class FineTokens:
+    def __init__(self, src: str):
+        self.src = src
+        self.tokens = list(tokenize(src))
+        self.lines = [m.start() for m in re.finditer("\n", src)]
+
+    def dump(self, *, start=None, end=None):
+        if start is None:
+            start = 0
+        if end is None:
+            end = len(self.tokens)
+
+        for token in self.tokens[start:end]:
+            (kind, start, length) = token
+            line_index = bisect.bisect_left(self.lines, start)
+            if line_index == 0:
+                col_start = 0
+            else:
+                col_start = self.lines[line_index - 1] + 1
+            column_index = start - col_start
+            print(
+                f"{start:04} {kind.value:12} {self.src[start:start+length]} ({line_index}, {column_index})"
+            )
+
+
+if __name__ == "__main__":
+    grammar = FineGrammar()
+    table = grammar.build_table(start="expression")
+
+    print(f"{len(table)} states")
+
+    average_entries = sum(len(row) for row in table) / len(table)
+    max_entries = max(len(row) for row in table)
+    print(f"{average_entries} average, {max_entries} max")
