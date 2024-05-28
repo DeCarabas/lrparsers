@@ -89,8 +89,12 @@ def parse(table, tokens, trace=None):
 
 
 def harness(lexer_func, grammar_func, start_rule, source_path):
-    generator = parser.GenerateLR1
-    # generator = parser.GenerateLALR
+    # generator = parser.GenerateLR1
+    generator = parser.GenerateLALR
+
+    trace = None
+    # trace = trace_state
+
     table = grammar_func().build_table(start=start_rule, generator=generator)
     print(f"{len(table)} states")
 
@@ -104,7 +108,7 @@ def harness(lexer_func, grammar_func, start_rule, source_path):
         tokens = lexer_func(src)
         # print(f"{tokens.lines}")
         # tokens.dump(end=5)
-        (_, errors) = parse(table, tokens)
+        (_, errors) = parse(table, tokens, trace=trace)
         if len(errors) > 0:
             print(f"{len(errors)} errors:")
             for error in errors:

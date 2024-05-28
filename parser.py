@@ -267,6 +267,20 @@ class Configuration:
     def rest(self):
         return self.symbols[(self.position + 1) :]
 
+    def __repr__(self) -> str:
+        la = ", " + str(self.lookahead) if self.lookahead != () else ""
+        return "{name} -> {bits}{lookahead}".format(
+            name=self.name,
+            bits=" ".join(
+                [
+                    ("* " + str(sym)) if i == self.position else str(sym)
+                    for i, sym in enumerate(self.symbols)
+                ]
+            )
+            + (" *" if self.at_end else ""),
+            lookahead=la,
+        )
+
     def format(self, alphabet: list[str]) -> str:
         la = ", " + str(tuple(alphabet[i] for i in self.lookahead)) if self.lookahead != () else ""
         return "{name} -> {bits}{lookahead}".format(
@@ -282,7 +296,9 @@ class Configuration:
         )
 
 
-ConfigSet = typing.Tuple[Configuration, ...]
+# ConfigSet = typing.Tuple[Configuration, ...]
+class ConfigSet(frozenset):
+    pass
 
 
 class ConfigurationSetInfo:
@@ -807,7 +823,7 @@ class GenerateLR0(object):
             pending_next = temp
             pending_next.clear()
 
-        return tuple(sorted(closure))  # TODO: Why tuple?
+        return ConfigSet(closure)  # TODO: Why tuple?
 
     def gen_successor(self, config_set: typing.Iterable[Configuration], symbol: int) -> ConfigSet:
         """Compute the successor state for the given config set and the
@@ -834,7 +850,7 @@ class GenerateLR0(object):
         could possibly see, and figure out which configs sets we get from
         those symbols. Those are the successors of this set.)
         """
-        possible = tuple(sorted({config.next for config in config_set if config.next is not None}))
+        possible = {config.next for config in config_set if config.next is not None}
 
         next = []
         for symbol in possible:
@@ -1400,9 +1416,9 @@ class GenerateLALR(GenerateLR1):
         # First, do the actual walk. Don't merge yet: just keep track of all
         # the config sets that need to be merged.
         #
-        F = {}
-        seen = set()
-        successors = []
+        F: dict[ConfigSet, list[ConfigSet]] = {}
+        seen: set[ConfigSet] = set()
+        successors: list[typing.Tuple[ConfigSet, int, ConfigSet]] = []
         pending = [config_set]
         while len(pending) > 0:
             config_set = pending.pop()
@@ -1410,7 +1426,7 @@ class GenerateLALR(GenerateLR1):
                 continue
             seen.add(config_set)
 
-            config_set_no_la = tuple(s.clear_lookahead() for s in config_set)
+            config_set_no_la = ConfigSet(s.clear_lookahead() for s in config_set)
 
             existing = F.get(config_set_no_la)
             if existing is not None:
@@ -1419,32 +1435,27 @@ class GenerateLALR(GenerateLR1):
                 F[config_set_no_la] = [config_set]
 
             for symbol, successor in self.gen_all_successors(config_set):
-                successor_no_la = tuple(s.clear_lookahead() for s in successor)
+                successor_no_la = ConfigSet(s.clear_lookahead() for s in successor)
                 successors.append((config_set_no_la, symbol, successor_no_la))
                 pending.append(successor)
 
         # Now we gathered the sets, merge them all.
-        final_sets = {}
+        final_sets: dict[ConfigSet, ConfigSet] = {}
         for key, config_sets in F.items():
-            new_config_set = []
-            config_groupings = [[] for _ in range(len(config_sets[0]))]
+            la_merge: dict[Configuration, set[int]] = {}
             for config_set in config_sets:
-                for i, config in enumerate(config_set):
-                    config_groupings[i].append(config)
+                for config in config_set:
+                    la_key = config.clear_lookahead()
+                    la_set = la_merge.get(la_key)
+                    if la_set is None:
+                        la_merge[la_key] = set(config.lookahead)
+                    else:
+                        la_set.update(config.lookahead)
 
-            for config_group in config_groupings:
-                new_lookahead = [l for config in config_group for l in config.lookahead]
-                new_lookahead = tuple(sorted(set(new_lookahead)))
-                new_config_set.append(
-                    Configuration(
-                        name=config_group[0].name,
-                        symbols=config_group[0].symbols,
-                        position=config_group[0].position,
-                        lookahead=new_lookahead,
-                    )
-                )
-
-            final_sets[key] = tuple(new_config_set)
+            final_set = ConfigSet(
+                config.replace_lookahead(tuple(sorted(la))) for config, la in la_merge.items()
+            )
+            final_sets[key] = final_set
 
         # Register all the actually merged, final config sets.
         result = ConfigurationSetInfo()
