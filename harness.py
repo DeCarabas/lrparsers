@@ -2,10 +2,22 @@ import bisect
 import typing
 
 import grammar
-from parser import Token, Grammar, rule, seq
+import parser
+
+# from parser import Token, Grammar, rule, seq
 
 
-def parse(table, tokens, trace=False):
+def trace_state(stack, input, input_index, action):
+    print(
+        "{stack: <20}  {input: <50}  {action: <5}".format(
+            stack=repr([s[0] for s in stack]),
+            input=repr(input[input_index : input_index + 4]),
+            action=repr(action),
+        )
+    )
+
+
+def parse(table, tokens, trace=None):
     """Parse the input with the generated parsing table and return the
     concrete syntax tree.
 
@@ -35,13 +47,7 @@ def parse(table, tokens, trace=False):
 
         action = table[current_state].get(current_token, ("error",))
         if trace:
-            print(
-                "{stack: <20}  {input: <50}  {action: <5}".format(
-                    stack=repr([s[0] for s in stack]),
-                    input=repr(input[input_index : input_index + 4]),
-                    action=repr(action),
-                )
-            )
+            trace(stack, input, input_index, action)
 
         if action[0] == "accept":
             return (stack[-1][1], [])
@@ -83,7 +89,9 @@ def parse(table, tokens, trace=False):
 
 
 def harness(lexer_func, grammar_func, start_rule, source_path):
-    table = grammar_func().build_table(start=start_rule)
+    # generator = parser.GenerateLR1
+    generator = parser.GenerateLALR
+    table = grammar_func().build_table(start=start_rule, generator=generator)
     print(f"{len(table)} states")
 
     average_entries = sum(len(row) for row in table) / len(table)
@@ -96,7 +104,7 @@ def harness(lexer_func, grammar_func, start_rule, source_path):
         tokens = lexer_func(src)
         # print(f"{tokens.lines}")
         # tokens.dump(end=5)
-        (_, errors) = parse(table, tokens, trace=True)
+        (_, errors) = parse(table, tokens)
         if len(errors) > 0:
             print(f"{len(errors)} errors:")
             for error in errors:

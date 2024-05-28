@@ -257,6 +257,14 @@ class Configuration:
             lookahead=(),
         )
 
+    def replace_lookahead(self, lookahead: typing.Tuple[int, ...]):
+        return Configuration(
+            name=self.name,
+            symbols=self.symbols,
+            position=self.position,
+            lookahead=lookahead,
+        )
+
     @property
     def rest(self):
         return self.symbols[(self.position + 1) :]
@@ -1382,7 +1390,11 @@ class GenerateLALR(GenerateLR1):
     use a bunch of improvement, probably.)
     """
 
-    def merge_sets(self, config_set_a, config_set_b):
+    def merge_sets(
+        self,
+        config_set_a: typing.Tuple[Configuration, ...],
+        config_set_b: typing.Tuple[Configuration, ...],
+    ):
         """Merge the two config sets, by keeping the item cores but merging
         the lookahead sets for each item.
         """
@@ -1394,7 +1406,7 @@ class GenerateLALR(GenerateLR1):
 
             new_lookahead = a.lookahead + b.lookahead
             new_lookahead = tuple(sorted(set(new_lookahead)))
-            merged.append(a.clear_lookahead())
+            merged.append(a.replace_lookahead(new_lookahead))
 
         return tuple(merged)
 
@@ -1403,7 +1415,7 @@ class GenerateLALR(GenerateLR1):
         b_no_la = tuple(s.clear_lookahead() for s in b)
         return a_no_la == b_no_la
 
-    def gen_sets(self, config_set) -> ConfigurationSetInfo:
+    def gen_sets(self, config_set: typing.Tuple[Configuration, ...]) -> ConfigurationSetInfo:
         """Recursively generate all configuration sets starting from the
         provided set, and merge them with the provided set 'F'.
 
@@ -1414,10 +1426,15 @@ class GenerateLALR(GenerateLR1):
         and replace the set in F, returning the modified set.
         """
         F = {}
+        seen = set()
         successors = []
         pending = [config_set]
         while len(pending) > 0:
             config_set = pending.pop()
+            if config_set in seen:
+                continue
+            seen.add(config_set)
+
             config_set_no_la = tuple(s.clear_lookahead() for s in config_set)
 
             existing = F.get(config_set_no_la)
@@ -1425,10 +1442,11 @@ class GenerateLALR(GenerateLR1):
                 F[config_set_no_la] = self.merge_sets(config_set, existing)
             else:
                 F[config_set_no_la] = config_set
-                for symbol, successor in self.gen_all_successors(config_set):
-                    successor_no_la = tuple(s.clear_lookahead() for s in successor)
-                    successors.append((config_set_no_la, symbol, successor_no_la))
-                    pending.append(successor)
+
+            for symbol, successor in self.gen_all_successors(config_set):
+                successor_no_la = tuple(s.clear_lookahead() for s in successor)
+                successors.append((config_set_no_la, symbol, successor_no_la))
+                pending.append(successor)
 
         # Register all the actually merged, final config sets.
         result = ConfigurationSetInfo()
@@ -1723,7 +1741,7 @@ class Grammar:
 
         return grammar
 
-    def build_table(self, start: str, generator=GenerateLR1):
+    def build_table(self, start: str, generator=GenerateLALR):
         """Construct a parse table for this grammar, starting at the named
         nonterminal rule.
         """
