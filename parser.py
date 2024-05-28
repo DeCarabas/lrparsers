@@ -1390,41 +1390,18 @@ class GenerateLALR(GenerateLR1):
     use a bunch of improvement, probably.)
     """
 
-    def merge_sets(
-        self,
-        config_set_a: typing.Tuple[Configuration, ...],
-        config_set_b: typing.Tuple[Configuration, ...],
-    ):
-        """Merge the two config sets, by keeping the item cores but merging
-        the lookahead sets for each item.
-        """
-        assert len(config_set_a) == len(config_set_b)
-        merged = []
-        for index, a in enumerate(config_set_a):
-            b = config_set_b[index]
-            assert a.clear_lookahead() == b.clear_lookahead()
-
-            new_lookahead = a.lookahead + b.lookahead
-            new_lookahead = tuple(sorted(set(new_lookahead)))
-            merged.append(a.replace_lookahead(new_lookahead))
-
-        return tuple(merged)
-
-    def sets_equal(self, a, b):
-        a_no_la = tuple(s.clear_lookahead() for s in a)
-        b_no_la = tuple(s.clear_lookahead() for s in b)
-        return a_no_la == b_no_la
-
     def gen_sets(self, config_set: typing.Tuple[Configuration, ...]) -> ConfigurationSetInfo:
         """Recursively generate all configuration sets starting from the
-        provided set, and merge them with the provided set 'F'.
+        provided set.
 
         The difference between this method and the one in GenerateLR0, where
-        this comes from, is in the part that stops recursion. In LALR we
-        compare for set equality *ignoring lookahead*. If we find a match,
-        then instead of returning F unchanged, we merge the two equal sets
-        and replace the set in F, returning the modified set.
+        this comes from, is that we're going to be keeping track of states
+        that we found that are equivalent in lookahead.
         """
+        #
+        # First, do the actual walk. Don't merge yet: just keep track of all
+        # the config sets that need to be merged.
+        #
         F = {}
         seen = set()
         successors = []
@@ -1439,18 +1416,41 @@ class GenerateLALR(GenerateLR1):
 
             existing = F.get(config_set_no_la)
             if existing is not None:
-                F[config_set_no_la] = self.merge_sets(config_set, existing)
+                existing.append(config_set)
             else:
-                F[config_set_no_la] = config_set
+                F[config_set_no_la] = [config_set]
 
             for symbol, successor in self.gen_all_successors(config_set):
                 successor_no_la = tuple(s.clear_lookahead() for s in successor)
                 successors.append((config_set_no_la, symbol, successor_no_la))
                 pending.append(successor)
 
+        # Now we gathered the sets, merge them all.
+        final_sets = {}
+        for key, config_sets in F.items():
+            new_config_set = []
+            config_groupings = [[] for _ in range(len(config_sets[0]))]
+            for config_set in config_sets:
+                for i, config in enumerate(config_set):
+                    config_groupings[i].append(config)
+
+            for config_group in config_groupings:
+                new_lookahead = [l for config in config_group for l in config.lookahead]
+                new_lookahead = tuple(sorted(set(new_lookahead)))
+                new_config_set.append(
+                    Configuration(
+                        name=config_group[0].name,
+                        symbols=config_group[0].symbols,
+                        position=config_group[0].position,
+                        lookahead=new_lookahead,
+                    )
+                )
+
+            final_sets[key] = tuple(new_config_set)
+
         # Register all the actually merged, final config sets.
         result = ConfigurationSetInfo()
-        for config_set in F.values():
+        for config_set in final_sets.values():
             result.register_config_set(config_set)
 
         # Now record all the successors that we found. Of course, the actual
@@ -1461,10 +1461,10 @@ class GenerateLALR(GenerateLR1):
         # so we can find the final sets, then look them up in the registered
         # sets, and actually register the successor.
         for config_set_no_la, symbol, successor_no_la in successors:
-            actual_config_set = F[config_set_no_la]
+            actual_config_set = final_sets[config_set_no_la]
             from_index = result.config_set_key[actual_config_set]
 
-            actual_successor = F[successor_no_la]
+            actual_successor = final_sets[successor_no_la]
             to_index = result.config_set_key[actual_successor]
 
             result.add_successor(from_index, symbol, to_index)
