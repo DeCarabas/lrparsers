@@ -207,11 +207,9 @@ class Configuration:
     def __hash__(self) -> int:
         return self._hash
 
-    def __eq__(self, value: object, /) -> bool:
+    def __eq__(self, value: typing.Any, /) -> bool:
         if value is self:
             return True
-        if not isinstance(value, Configuration):
-            return NotImplemented
 
         return (
             value._hash == self._hash
@@ -846,7 +844,7 @@ class GenerateLR0(object):
 
         return next
 
-    def gen_sets(self, config_set: typing.Tuple[Configuration, ...]) -> ConfigurationSetInfo:
+    def gen_sets(self, config_set: ConfigSet) -> ConfigurationSetInfo:
         """Generate all configuration sets starting from the provided set."""
         result = ConfigurationSetInfo()
 
@@ -1390,7 +1388,7 @@ class GenerateLALR(GenerateLR1):
     use a bunch of improvement, probably.)
     """
 
-    def gen_sets(self, config_set: typing.Tuple[Configuration, ...]) -> ConfigurationSetInfo:
+    def gen_sets(self, config_set: ConfigSet) -> ConfigurationSetInfo:
         """Recursively generate all configuration sets starting from the
         provided set.
 

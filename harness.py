@@ -89,8 +89,8 @@ def parse(table, tokens, trace=None):
 
 
 def harness(lexer_func, grammar_func, start_rule, source_path):
-    # generator = parser.GenerateLR1
-    generator = parser.GenerateLALR
+    generator = parser.GenerateLR1
+    # generator = parser.GenerateLALR
     table = grammar_func().build_table(start=start_rule, generator=generator)
     print(f"{len(table)} states")
 
