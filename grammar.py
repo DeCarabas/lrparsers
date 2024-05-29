@@ -78,11 +78,11 @@ class FineGrammar(Grammar):
 
     @rule
     def file(self):
-        return self.file_statement_list
+        return self._file_statement_list
 
     @rule
-    def file_statement_list(self):
-        return self.file_statement | (self.file_statement_list + self.file_statement)
+    def _file_statement_list(self):
+        return self.file_statement | (self._file_statement_list + self.file_statement)
 
     @rule
     def file_statement(self):

@@ -1,4 +1,5 @@
 import bisect
+from dataclasses import dataclass
 import enum
 import select
 import sys
@@ -22,7 +23,13 @@ def trace_state(stack, input, input_index, action):
     )
 
 
-def parse(table, tokens, trace=None):
+@dataclass
+class Tree:
+    name: str | None
+    children: typing.Tuple["Tree | str", ...]
+
+
+def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | None, list[str]]:
     """Parse the input with the generated parsing table and return the
     concrete syntax tree.
 
@@ -36,7 +43,7 @@ def parse(table, tokens, trace=None):
     This is not a *great* parser, it's really just a demo for what you can
     do with the table.
     """
-    input = [t.value for (t, _, _) in tokens.tokens]
+    input: list[str] = [t.value for (t, _, _) in tokens.tokens]
 
     assert "$" not in input
     input = input + ["$"]
@@ -45,38 +52,50 @@ def parse(table, tokens, trace=None):
     # Our stack is a stack of tuples, where the first entry is the state number
     # and the second entry is the 'value' that was generated when the state was
     # pushed.
-    stack: list[typing.Tuple[int, typing.Any]] = [(0, None)]
+    stack: list[typing.Tuple[int, str | Tree | None]] = [(0, None)]
     while True:
         current_state = stack[-1][0]
         current_token = input[input_index]
 
-        action = table[current_state].get(current_token, ("error",))
+        action = table.states[current_state].get(current_token, parser.Error())
         if trace:
             trace(stack, input, input_index, action)
 
-        if action[0] == "accept":
-            return (stack[-1][1], [])
+        match action:
+            case parser.Accept():
+                result = stack[-1][1]
+                assert isinstance(result, Tree)
+                return (result, [])
 
-        elif action[0] == "reduce":
-            name = action[1]
-            size = action[2]
+            case parser.Reduce(name=name, count=size, transparent=transparent):
+                children: list[str | Tree] = []
+                for _, c in stack[-size:]:
+                    if c is None:
+                        continue
+                    elif isinstance(c, Tree) and c.name is None:
+                        children.extend(c.children)
+                    else:
+                        children.append(c)
 
-            value = (name, tuple(s[1] for s in stack[-size:]))
-            stack = stack[:-size]
+                value = Tree(name=name if not transparent else None, children=tuple(children))
+                stack = stack[:-size]
 
-            goto = table[stack[-1][0]].get(name, ("error",))
-            assert goto[0] == "goto"  # Corrupt table?
-            stack.append((goto[1], value))
+                goto = table.states[stack[-1][0]].get(name, parser.Error())
+                assert isinstance(goto, parser.Goto)
+                stack.append((goto.state, value))
 
-        elif action[0] == "shift":
-            stack.append((action[1], (current_token, ())))
-            input_index += 1
+            case parser.Shift(state):
+                stack.append((state, current_token))
+                input_index += 1
 
-        elif action[0] == "error":
-            if input_index >= len(tokens.tokens):
-                raise ValueError("Unexpected end of file")
-            else:
-                (_, start, _) = tokens.tokens[input_index]
+            case parser.Error():
+                if input_index >= len(tokens.tokens):
+                    message = "Unexpected end of file"
+                    start = tokens.tokens[-1][1]
+                else:
+                    message = f"Syntax error: unexpected symbol {current_token}"
+                    (_, start, _) = tokens.tokens[input_index]
+
                 line_index = bisect.bisect_left(tokens.lines, start)
                 if line_index == 0:
                     col_start = 0
@@ -85,12 +104,11 @@ def parse(table, tokens, trace=None):
                 column_index = start - col_start
                 line_index += 1
 
-                return (
-                    None,
-                    [
-                        f"{line_index}:{column_index}: Syntax error: unexpected symbol {current_token}"
-                    ],
-                )
+                error = f"{line_index}:{column_index}: {message}"
+                return (None, [error])
+
+            case _:
+                raise ValueError(f"Unknown action type: {action}")
 
 
 # https://en.wikipedia.org/wiki/ANSI_escape_code
@@ -138,6 +156,8 @@ def leave_alt_screen():
 
 class Harness:
     source: str | None
+    table: parser.ParseTable | None
+    tree: Tree | None
 
     def __init__(self, lexer_func, grammar_func, start_rule, source_path):
         # self.generator = parser.GenerateLR1
@@ -168,6 +188,7 @@ class Harness:
             self.table = self.grammar_func().build_table(
                 start=self.start_rule, generator=self.generator
             )
+        assert self.table is not None
 
         if self.tokens is None:
             with open(self.source_path, "r", encoding="utf-8") as f:
@@ -184,9 +205,10 @@ class Harness:
         sys.stdout.buffer.write(CLEAR)
         rows, cols = termios.tcgetwinsize(sys.stdout.fileno())
 
-        average_entries = sum(len(row) for row in self.table) / len(self.table)
-        max_entries = max(len(row) for row in self.table)
-        print(f"{len(self.table)} states - {average_entries} average, {max_entries} max\r")
+        states = self.table.states
+        average_entries = sum(len(row) for row in states) / len(states)
+        max_entries = max(len(row) for row in states)
+        print(f"{len(states)} states - {average_entries} average, {max_entries} max\r")
 
         if self.tree is not None:
             lines = []
@@ -197,11 +219,15 @@ class Harness:
         sys.stdout.flush()
         sys.stdout.buffer.flush()
 
-    def format_node(self, lines, node, indent=0):
+    def format_node(self, lines, node: Tree | str, indent=0):
         """Print out an indented concrete syntax tree, from parse()."""
-        lines.append((" " * indent) + node[0])
-        for child in node[1]:
-            self.format_node(lines, child, indent + 2)
+        match node:
+            case Tree(name, children):
+                lines.append((" " * indent) + (name or "???"))
+                for child in children:
+                    self.format_node(lines, child, indent + 2)
+            case _:
+                lines.append((" " * indent) + str(node))
 
 
 if __name__ == "__main__":

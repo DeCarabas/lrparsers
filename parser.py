@@ -393,13 +393,45 @@ class Assoc(enum.Enum):
     RIGHT = 2
 
 
+@dataclasses.dataclass
+class Action:
+    pass
+
+
+@dataclasses.dataclass
+class Reduce(Action):
+    name: str
+    count: int
+    transparent: bool
+
+
+@dataclasses.dataclass
+class Shift(Action):
+    state: int
+
+
+@dataclasses.dataclass
+class Goto(Action):
+    state: int
+
+
+@dataclasses.dataclass
+class Accept(Action):
+    pass
+
+
+@dataclasses.dataclass
+class Error(Action):
+    pass
+
+
 class ErrorCollection:
     """A collection of errors. The errors are grouped by config set and alphabet
     symbol, so that we can group the error strings appropriately when we format
     the error.
     """
 
-    errors: dict[ConfigSet, dict[int, dict[Configuration, typing.Tuple]]]
+    errors: dict[ConfigSet, dict[int, dict[Configuration, Action]]]
 
     def __init__(self):
         self.errors = {}
@@ -413,7 +445,7 @@ class ErrorCollection:
         config_set: ConfigSet,
         symbol: int,
         config: Configuration,
-        action: typing.Tuple,
+        action: Action,
     ):
         """Add an error to the collection.
 
@@ -470,15 +502,17 @@ class ErrorCollection:
                     if config.next is None:
                         rule += " *"
 
-                    if action[0] == "reduce":
-                        action_str = f"pop {action[2]} values off the stack and make a {action[1]}"
-                    elif action[0] == "shift":
-                        action_str = "consume the token and keep going"
-                    elif action[0] == "accept":
-                        action_str = "accept the parse"
-                    else:
-                        assert action[0] == "goto", f"Unknown action {action[0]}"
-                        raise Exception("Shouldn't conflict on goto ever")
+                    match action:
+                        case Reduce(name=name, count=count, transparent=transparent):
+                            name_str = name if not transparent else "transparent node"
+                            action_str = f"pop {count} values off the stack and make a {name_str}"
+                        case Shift():
+                            action_str = "consume the token and keep going"
+                        case Accept():
+                            action_str = "accept the parse"
+                        case _:
+                            assert isinstance(action, Goto)
+                            raise Exception("Shouldn't conflict on goto ever")
 
                     lines.append(
                         f"  - We are in the rule `{name}: {rule}` and we should {action_str}"
@@ -489,6 +523,11 @@ class ErrorCollection:
         return "\n\n".join(errors)
 
 
+@dataclasses.dataclass
+class ParseTable:
+    states: list[dict[str, Action]]
+
+
 class TableBuilder(object):
     """A helper object to assemble actions into build parse tables.
 
@@ -497,23 +536,27 @@ class TableBuilder(object):
     """
 
     errors: ErrorCollection
-    table: list[dict[str, typing.Tuple]]
+    table: list[dict[str, Action]]
     alphabet: list[str]
     precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
-    row: None | list[typing.Tuple[None | typing.Tuple, None | Configuration]]
+    transparents: set[str]
+
+    row: None | list[typing.Tuple[None | Action, None | Configuration]]
 
     def __init__(
         self,
         alphabet: list[str],
         precedence: typing.Tuple[typing.Tuple[Assoc, int], ...],
+        transparents: set[str],
     ):
         self.errors = ErrorCollection()
         self.table = []
         self.alphabet = alphabet
         self.precedence = precedence
+        self.transparents = transparents
         self.row = None
 
-    def flush(self, all_sets: ConfigurationSetInfo) -> list[dict[str, typing.Tuple]]:
+    def flush(self, all_sets: ConfigurationSetInfo) -> ParseTable:
         """Finish building the table and return it.
 
         Raises ValueError if there were any conflicts during construction.
@@ -522,7 +565,7 @@ class TableBuilder(object):
         if self.errors.any():
             errors = self.errors.format(self.alphabet, all_sets)
             raise ValueError(f"Errors building the table:\n\n{errors}")
-        return self.table
+        return ParseTable(states=self.table)
 
     def new_row(self, config_set: ConfigSet):
         """Start a new row, processing the given config set. Call this before
@@ -541,36 +584,35 @@ class TableBuilder(object):
         """Mark a reduce of the given configuration for the given symbol in the
         current row.
         """
-        action = ("reduce", self.alphabet[config.name], len(config.symbols))
+        name = self.alphabet[config.name]
+        transparent = name in self.transparents
+        action = Reduce(name, len(config.symbols), transparent)
         self._set_table_action(symbol, action, config)
 
     def set_table_accept(self, symbol: int, config: Configuration):
         """Mark a accept of the given configuration for the given symbol in the
         current row.
         """
-        action = ("accept",)
-        self._set_table_action(symbol, action, config)
+        self._set_table_action(symbol, Accept(), config)
 
     def set_table_shift(self, symbol: int, index: int, config: Configuration):
         """Mark a shift in the current row of the given given symbol to the
         given index. The configuration here provides debugging informtion for
         conflicts.
         """
-        action = ("shift", index)
-        self._set_table_action(symbol, action, config)
+        self._set_table_action(symbol, Shift(index), config)
 
     def set_table_goto(self, symbol: int, index: int):
         """Set the goto for the given nonterminal symbol in the current row."""
-        action = ("goto", index)
-        self._set_table_action(symbol, action, None)
+        self._set_table_action(symbol, Goto(index), None)
 
-    def _action_precedence(self, symbol: int, action: typing.Tuple, config: Configuration):
-        if action[0] == "shift":
+    def _action_precedence(self, symbol: int, action: Action, config: Configuration):
+        if isinstance(action, Shift):
             return self.precedence[symbol]
         else:
             return self.precedence[config.name]
 
-    def _set_table_action(self, symbol_id: int, action: typing.Tuple, config: Configuration | None):
+    def _set_table_action(self, symbol_id: int, action: Action, config: Configuration | None):
         """Set the action for 'symbol' in the table row to 'action'.
 
         This is destructive; it changes the table. It records an error if
@@ -607,17 +649,17 @@ class TableBuilder(object):
                 resolved = False
                 if assoc == Assoc.LEFT:
                     # Prefer reduce over shift
-                    if action[0] == "shift" and existing[0] == "reduce":
+                    if isinstance(action, Shift) and isinstance(existing, Reduce):
                         action = existing
                         resolved = True
-                    elif action[0] == "reduce" and existing[0] == "shift":
+                    elif isinstance(action, Reduce) and isinstance(existing, Shift):
                         resolved = True
 
                 elif assoc == Assoc.RIGHT:
                     # Prefer shift over reduce
-                    if action[0] == "shift" and existing[0] == "reduce":
+                    if isinstance(action, Shift) and isinstance(existing, Reduce):
                         resolved = True
-                    elif action[0] == "reduce" and existing[0] == "shift":
+                    elif isinstance(action, Reduce) and isinstance(existing, Shift):
                         action = existing
                         resolved = True
 
@@ -636,7 +678,7 @@ class TableBuilder(object):
         self.row[symbol_id] = (action, config)
 
 
-class GenerateLR0(object):
+class GenerateLR0:
     """Generate parser tables for an LR0 parser."""
 
     # Internally we use integers as symbols, not strings. Mostly this is fine,
@@ -659,6 +701,10 @@ class GenerateLR0(object):
     # for a symbol, then its entry in this tuple will be (NONE, 0).
     precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
 
+    # The set of symbols for which we should reduce "transparently." This doesn't
+    # affect state generation at all, only the generation of the final table.
+    transparents: set[str]
+
     # The lookup that maps a particular symbol to an integer. (Only really used
     # for debugging.)
     symbol_key: dict[str, int]
@@ -675,6 +721,7 @@ class GenerateLR0(object):
         start: str,
         grammar: list[typing.Tuple[str, list[str]]],
         precedence: None | dict[str, typing.Tuple[Assoc, int]] = None,
+        transparents: None | set[str] = None,
     ):
         """Initialize the parser generator with the specified grammar and
         start symbol.
@@ -776,6 +823,10 @@ class GenerateLR0(object):
         if precedence is None:
             precedence = {}
         self.precedence = tuple(precedence.get(a, (Assoc.NONE, 0)) for a in self.alphabet)
+
+        if transparents is None:
+            transparents = set()
+        self.transparents = transparents
 
         self.symbol_key = symbol_key
         self.start_symbol = start_symbol
@@ -903,7 +954,7 @@ class GenerateLR0(object):
         del config
         return [index for index, value in enumerate(self.terminal) if value]
 
-    def gen_table(self):
+    def gen_table(self) -> ParseTable:
         """Generate the parse table.
 
         The parse table is a list of states. The first state in the list is
@@ -932,7 +983,7 @@ class GenerateLR0(object):
         Anything missing from the row indicates an error.
         """
         config_sets = self.gen_all_sets()
-        builder = TableBuilder(self.alphabet, self.precedence)
+        builder = TableBuilder(self.alphabet, self.precedence, self.transparents)
 
         for config_set_id, config_set in enumerate(config_sets.sets):
             builder.new_row(config_set)
@@ -959,7 +1010,7 @@ class GenerateLR0(object):
         return builder.flush(config_sets)
 
 
-def parse(table, input, trace=False):
+def parse(table: ParseTable, input, trace=False):
     """Parse the input with the generated parsing table and return the
     concrete syntax tree.
 
@@ -985,7 +1036,7 @@ def parse(table, input, trace=False):
         current_state = stack[-1][0]
         current_token = input[input_index]
 
-        action = table[current_state].get(current_token, ("error",))
+        action = table.states[current_state].get(current_token, Error())
         if trace:
             print(
                 "{stack: <20}  {input: <50}  {action: <5}".format(
@@ -995,30 +1046,35 @@ def parse(table, input, trace=False):
                 )
             )
 
-        if action[0] == "accept":
-            return stack[-1][1]
+        match action:
+            case Accept():
+                return stack[-1][1]
 
-        elif action[0] == "reduce":
-            name = action[1]
-            size = action[2]
+            case Reduce(name=name, count=size, transparent=transparent):
+                children = []
+                for _, c in stack[-size:]:
+                    if isinstance(c, tuple) and c[0] is None:
+                        children.extend(c[1])
+                    else:
+                        children.append(c)
 
-            value = (name, tuple(s[1] for s in stack[-size:]))
-            stack = stack[:-size]
+                value = (name if not transparent else None, tuple(children))
+                stack = stack[:-size]
 
-            goto = table[stack[-1][0]].get(name, ("error",))
-            assert goto[0] == "goto"  # Corrupt table?
-            stack.append((goto[1], value))
+                goto = table.states[stack[-1][0]].get(name, Error())
+                assert isinstance(goto, Goto)
+                stack.append((goto.state, value))
 
-        elif action[0] == "shift":
-            stack.append((action[1], (current_token, ())))
-            input_index += 1
+            case Shift(state):
+                stack.append((state, (current_token, ())))
+                input_index += 1
 
-        elif action[0] == "error":
-            raise ValueError(
-                "Syntax error: unexpected symbol {sym}".format(
-                    sym=current_token,
-                ),
-            )
+            case Error():
+                raise ValueError(
+                    "Syntax error: unexpected symbol {sym}".format(
+                        sym=current_token,
+                    ),
+                )
 
 
 ###############################################################################
@@ -1539,7 +1595,16 @@ class NonTerminal(Rule):
     grammar class.
     """
 
-    def __init__(self, fn: typing.Callable[["Grammar"], Rule], name: str | None = None):
+    fn: typing.Callable[["Grammar"], Rule]
+    name: str
+    transparent: bool
+
+    def __init__(
+        self,
+        fn: typing.Callable[["Grammar"], Rule],
+        name: str | None = None,
+        transparent: bool = False,
+    ):
         """Create a new NonTerminal.
 
         `fn` is the function that will yield the `Rule` which is the
@@ -1549,6 +1614,7 @@ class NonTerminal(Rule):
         """
         self.fn = fn
         self.name = name or fn.__name__
+        self.transparent = transparent
 
     def generate_body(self, grammar) -> list[list[str | Token]]:
         """Generate the body of the non-terminal.
@@ -1638,7 +1704,8 @@ def rule(f: typing.Callable) -> Rule:
     of the nonterminal, which defaults to the name of the function.
     """
     name = f.__name__
-    return NonTerminal(f, name)
+    transparent = name.startswith("_")
+    return NonTerminal(f, name, transparent)
 
 
 PrecedenceList = list[typing.Tuple[Assoc, list[Rule]]]
@@ -1689,7 +1756,9 @@ class Grammar:
 
         self._precedence = precedence_table
 
-    def generate_nonterminal_dict(self, start: str) -> dict[str, list[list[str | Token]]]:
+    def generate_nonterminal_dict(
+        self, start: str
+    ) -> typing.Tuple[dict[str, list[list[str | Token]]], set[str]]:
         """Convert the rules into a dictionary of productions.
 
         Our table generators work on a very flat set of productions. This is the
@@ -1700,6 +1769,7 @@ class Grammar:
         """
         rules = inspect.getmembers(self, lambda x: isinstance(x, NonTerminal))
         nonterminals = {rule.name: rule for _, rule in rules}
+        transparents = {rule.name for _, rule in rules if rule.transparent}
 
         grammar = {}
 
@@ -1724,9 +1794,9 @@ class Grammar:
 
             grammar[rule.name] = body
 
-        return grammar
+        return (grammar, transparents)
 
-    def desugar(self, start: str) -> list[typing.Tuple[str, list[str]]]:
+    def desugar(self, start: str) -> typing.Tuple[list[typing.Tuple[str, list[str]]], set[str]]:
         """Convert the rules into a flat list of productions.
 
         Our table generators work from a very flat set of productions. The form
@@ -1734,7 +1804,7 @@ class Grammar:
         generate_nonterminal_dict- less useful to people, probably, but it is
         the input form needed by the Generator.
         """
-        temp_grammar = self.generate_nonterminal_dict(start)
+        temp_grammar, transparents = self.generate_nonterminal_dict(start)
 
         grammar = []
         for rule_name, clauses in temp_grammar.items():
@@ -1748,15 +1818,15 @@ class Grammar:
 
                 grammar.append((rule_name, new_clause))
 
-        return grammar
+        return grammar, transparents
 
     def build_table(self, start: str, generator=GenerateLALR):
         """Construct a parse table for this grammar, starting at the named
         nonterminal rule.
         """
-        desugared = self.desugar(start)
+        desugared, transparents = self.desugar(start)
 
-        gen = generator(start, desugared, precedence=self._precedence)
+        gen = generator(start, desugared, precedence=self._precedence, transparents=transparents)
         table = gen.gen_table()
         return table
 
@@ -1772,7 +1842,7 @@ def format_node(node):
     return "\n".join(lines)
 
 
-def format_table(generator, table):
+def format_table(generator, table: ParseTable):
     """Format a parser table so pretty."""
 
     def format_action(state, terminal):
@@ -1806,7 +1876,7 @@ def format_table(generator, table):
             ),
             gotos=" ".join("{0: <5}".format(row.get(nt, ("error", ""))[1]) for nt in nonterminals),
         )
-        for i, row in enumerate(table)
+        for i, row in enumerate(table.states)
     ]
     return "\n".join(lines)
 
