@@ -1,56 +1,56 @@
 # This is an example grammar.
 import re
 
-from parser import Assoc, Grammar, Nothing, Token, rule, seq
+from parser import Assoc, Grammar, Nothing, Terminal, rule, seq, Rule
 
-ARROW = Token("Arrow")
-AS = Token("As")
-BAR = Token("Bar")
-CLASS = Token("Class")
-COLON = Token("Colon")
-ELSE = Token("Else")
-FOR = Token("For")
-FUN = Token("Fun")
-IDENTIFIER = Token("Identifier")
-IF = Token("If")
-IMPORT = Token("Import")
-IN = Token("In")
-LCURLY = Token("LeftBrace")
-LET = Token("Let")
-RCURLY = Token("RightBrace")
-RETURN = Token("Return")
-SEMICOLON = Token("Semicolon")
-STRING = Token("String")
-WHILE = Token("While")
-EQUAL = Token("Equal")
-LPAREN = Token("LeftParen")
-RPAREN = Token("RightParen")
-COMMA = Token("Comma")
-SELF = Token("Selff")
-OR = Token("Or")
-IS = Token("Is")
-AND = Token("And")
-EQUALEQUAL = Token("EqualEqual")
-BANGEQUAL = Token("BangEqual")
-LESS = Token("Less")
-GREATER = Token("Greater")
-LESSEQUAL = Token("LessEqual")
-GREATEREQUAL = Token("GreaterEqual")
-PLUS = Token("Plus")
-MINUS = Token("Minus")
-STAR = Token("Star")
-SLASH = Token("Slash")
-NUMBER = Token("Number")
-TRUE = Token("True")
-FALSE = Token("False")
-BANG = Token("Bang")
-DOT = Token("Dot")
-MATCH = Token("Match")
-EXPORT = Token("Export")
-UNDERSCORE = Token("Underscore")
-NEW = Token("New")
-LSQUARE = Token("LeftBracket")
-RSQUARE = Token("RightBracket")
+ARROW = Terminal("Arrow")
+AS = Terminal("As")
+BAR = Terminal("Bar")
+CLASS = Terminal("Class")
+COLON = Terminal("Colon")
+ELSE = Terminal("Else")
+FOR = Terminal("For")
+FUN = Terminal("Fun")
+IDENTIFIER = Terminal("Identifier")
+IF = Terminal("If")
+IMPORT = Terminal("Import")
+IN = Terminal("In")
+LCURLY = Terminal("LeftBrace")
+LET = Terminal("Let")
+RCURLY = Terminal("RightBrace")
+RETURN = Terminal("Return")
+SEMICOLON = Terminal("Semicolon")
+STRING = Terminal("String")
+WHILE = Terminal("While")
+EQUAL = Terminal("Equal")
+LPAREN = Terminal("LeftParen")
+RPAREN = Terminal("RightParen")
+COMMA = Terminal("Comma")
+SELF = Terminal("Selff")
+OR = Terminal("Or")
+IS = Terminal("Is")
+AND = Terminal("And")
+EQUALEQUAL = Terminal("EqualEqual")
+BANGEQUAL = Terminal("BangEqual")
+LESS = Terminal("Less")
+GREATER = Terminal("Greater")
+LESSEQUAL = Terminal("LessEqual")
+GREATEREQUAL = Terminal("GreaterEqual")
+PLUS = Terminal("Plus")
+MINUS = Terminal("Minus")
+STAR = Terminal("Star")
+SLASH = Terminal("Slash")
+NUMBER = Terminal("Number")
+TRUE = Terminal("True")
+FALSE = Terminal("False")
+BANG = Terminal("Bang")
+DOT = Terminal("Dot")
+MATCH = Terminal("Match")
+EXPORT = Terminal("Export")
+UNDERSCORE = Terminal("Underscore")
+NEW = Terminal("New")
+LSQUARE = Terminal("LeftBracket")
+RSQUARE = Terminal("RightBracket")
 
 
 class FineGrammar(Grammar):
@@ -77,58 +77,58 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def file(self):
+    def file(self) -> Rule:
         return self._file_statement_list
 
     @rule
-    def _file_statement_list(self):
+    def _file_statement_list(self) -> Rule:
         return self._file_statement | (self._file_statement_list + self._file_statement)
 
     @rule
-    def _file_statement(self):
+    def _file_statement(self) -> Rule:
         return (
-            self.import_statement | self.class_declaration | self.export_statement | self.statement
+            self.import_statement | self.class_declaration | self.export_statement | self._statement
         )
 
     @rule
-    def import_statement(self):
+    def import_statement(self) -> Rule:
         return seq(IMPORT, STRING, AS, IDENTIFIER, SEMICOLON)
 
     @rule
-    def class_declaration(self):
+    def class_declaration(self) -> Rule:
         return seq(CLASS, IDENTIFIER, self.class_body)
 
     @rule
-    def class_body(self):
+    def class_body(self) -> Rule:
         return seq(LCURLY, RCURLY) | seq(LCURLY, self._class_members, RCURLY)
 
     @rule
-    def _class_members(self):
+    def _class_members(self) -> Rule:
         return self._class_member | seq(self._class_members, self._class_member)
 
     @rule
-    def _class_member(self):
+    def _class_member(self) -> Rule:
         return self.field_declaration | self.function_declaration
 
     @rule
-    def field_declaration(self):
+    def field_declaration(self) -> Rule:
         return seq(IDENTIFIER, COLON, self.type_expression, SEMICOLON)
 
     # Types
     @rule
-    def type_expression(self):
+    def type_expression(self) -> Rule:
         return self.alternate_type | self.type_identifier
 
     @rule
-    def alternate_type(self):
+    def alternate_type(self) -> Rule:
         return seq(self.type_expression, OR, self.type_identifier)
 
     @rule
-    def type_identifier(self):
+    def type_identifier(self) -> Rule:
         return IDENTIFIER
 
     @rule
-    def export_statement(self):
+    def export_statement(self) -> Rule:
         return (
             seq(EXPORT, self.class_declaration)
             | seq(EXPORT, self.function_declaration)
@@ -137,18 +137,18 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def export_list(self):
+    def export_list(self) -> Rule:
         return Nothing | IDENTIFIER | seq(IDENTIFIER, COMMA, self.export_list)
 
     # Functions
     @rule
-    def function_declaration(self):
+    def function_declaration(self) -> Rule:
         return seq(FUN, IDENTIFIER, self.function_parameters, self.block) | seq(
             FUN, IDENTIFIER, self.function_parameters, ARROW, self.type_expression, self.block
         )
 
     @rule
-    def function_parameters(self):
+    def function_parameters(self) -> Rule:
         return (
             seq(LPAREN, RPAREN)
             | seq(LPAREN, self.first_parameter, RPAREN)
@@ -156,33 +156,33 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def first_parameter(self):
+    def first_parameter(self) -> Rule:
         return SELF | self.parameter
 
     @rule
-    def parameter_list(self):
+    def parameter_list(self) -> Rule:
         return Nothing | self.parameter | seq(self.parameter, COMMA, self.parameter_list)
 
     @rule
-    def parameter(self):
+    def parameter(self) -> Rule:
         return seq(IDENTIFIER, COLON, self.type_expression)
 
     # Block
     @rule
-    def block(self):
+    def block(self) -> Rule:
         return (
             seq(LCURLY, RCURLY)
             | seq(LCURLY, self.expression, RCURLY)
-            | seq(LCURLY, self.statement_list, RCURLY)
-            | seq(LCURLY, self.statement_list, self.expression, RCURLY)
+            | seq(LCURLY, self._statement_list, RCURLY)
+            | seq(LCURLY, self._statement_list, self.expression, RCURLY)
         )
 
     @rule
-    def statement_list(self):
-        return self.statement | seq(self.statement_list, self.statement)
+    def _statement_list(self) -> Rule:
+        return self._statement | seq(self._statement_list, self._statement)
 
     @rule
-    def statement(self):
+    def _statement(self) -> Rule:
         return (
             self.function_declaration
             | self.let_statement
@@ -194,56 +194,56 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def let_statement(self):
+    def let_statement(self) -> Rule:
         return seq(LET, IDENTIFIER, EQUAL, self.expression, SEMICOLON)
 
     @rule
-    def return_statement(self):
+    def return_statement(self) -> Rule:
         return seq(RETURN, self.expression, SEMICOLON) | seq(RETURN, SEMICOLON)
 
     @rule
-    def for_statement(self):
+    def for_statement(self) -> Rule:
         return seq(FOR, self.iterator_variable, IN, self.expression, self.block)
 
     @rule
-    def iterator_variable(self):
+    def iterator_variable(self) -> Rule:
         return IDENTIFIER
 
     @rule
-    def if_statement(self):
+    def if_statement(self) -> Rule:
         return self.conditional_expression
 
     @rule
-    def while_statement(self):
+    def while_statement(self) -> Rule:
         return seq(WHILE, self.expression, self.block)
 
     @rule
-    def expression_statement(self):
+    def expression_statement(self) -> Rule:
         return seq(self.expression, SEMICOLON)
 
     # Expressions
     @rule
-    def expression(self):
+    def expression(self) -> Rule:
         return self.assignment_expression
 
     @rule
-    def assignment_expression(self):
+    def assignment_expression(self) -> Rule:
         return seq(self.or_expression, EQUAL, self.assignment_expression) | self.or_expression
 
     @rule
-    def or_expression(self):
+    def or_expression(self) -> Rule:
         return seq(self.or_expression, OR, self.is_expression) | self.is_expression
 
     @rule
-    def is_expression(self):
+    def is_expression(self) -> Rule:
         return seq(self.is_expression, IS, self.pattern) | self.and_expression
 
     @rule
-    def and_expression(self):
+    def and_expression(self) -> Rule:
         return seq(self.and_expression, AND, self.equality_expression) | self.equality_expression
 
     @rule
-    def equality_expression(self):
+    def equality_expression(self) -> Rule:
         return (
             seq(self.equality_expression, EQUALEQUAL, self.relation_expression)
             | seq(self.equality_expression, BANGEQUAL, self.relation_expression)
@@ -251,7 +251,7 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def relation_expression(self):
+    def relation_expression(self) -> Rule:
         return (
             seq(self.relation_expression, LESS, self.additive_expression)
             | seq(self.relation_expression, LESSEQUAL, self.additive_expression)
@@ -261,7 +261,7 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def additive_expression(self):
+    def additive_expression(self) -> Rule:
         return (
             seq(self.additive_expression, PLUS, self.multiplication_expression)
             | seq(self.additive_expression, MINUS, self.multiplication_expression)
@@ -269,7 +269,7 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def multiplication_expression(self):
+    def multiplication_expression(self) -> Rule:
         return (
             seq(self.multiplication_expression, STAR, self.primary_expression)
             | seq(self.multiplication_expression, SLASH, self.primary_expression)
@@ -277,7 +277,7 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def primary_expression(self):
+    def primary_expression(self) -> Rule:
         return (
             IDENTIFIER
             | SELF
@@ -299,7 +299,7 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def conditional_expression(self):
+    def conditional_expression(self) -> Rule:
         return (
             seq(IF, self.expression, self.block)
             | seq(IF, self.expression, self.block, ELSE, self.conditional_expression)
@@ -307,11 +307,11 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def list_constructor_expression(self):
+    def list_constructor_expression(self) -> Rule:
         return seq(LSQUARE, RSQUARE) | seq(LSQUARE, self.expression_list, RSQUARE)
 
     @rule
-    def expression_list(self):
+    def expression_list(self) -> Rule:
         return (
             self.expression
             | seq(self.expression, COMMA)
@@ -319,15 +319,15 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def match_expression(self):
+    def match_expression(self) -> Rule:
         return seq(MATCH, self.expression, self.match_body)
 
     @rule
-    def match_body(self):
+    def match_body(self) -> Rule:
         return seq(LCURLY, RCURLY) | seq(LCURLY, self.match_arms, RCURLY)
 
     @rule
-    def match_arms(self):
+    def match_arms(self) -> Rule:
         return (
             self.match_arm
             | seq(self.match_arm, COMMA)
@@ -335,11 +335,11 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def match_arm(self):
+    def match_arm(self) -> Rule:
         return seq(self.pattern, ARROW, self.expression)
 
     @rule
-    def pattern(self):
+    def pattern(self) -> Rule:
         return (
             seq(self.variable_binding, self.pattern_core, AND, self.and_expression)
             | seq(self.variable_binding, self.pattern_core)
@@ -348,27 +348,27 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def pattern_core(self):
+    def pattern_core(self) -> Rule:
         return self.type_expression | self.wildcard_pattern
 
     @rule
-    def wildcard_pattern(self):
+    def wildcard_pattern(self) -> Rule:
         return UNDERSCORE
 
     @rule
-    def variable_binding(self):
+    def variable_binding(self) -> Rule:
         return seq(IDENTIFIER, COLON)
 
     @rule
-    def object_constructor_expression(self):
+    def object_constructor_expression(self) -> Rule:
         return seq(NEW, self.type_identifier, self.field_list)
 
     @rule
-    def field_list(self):
+    def field_list(self) -> Rule:
         return seq(LCURLY, RCURLY) | seq(LCURLY, self.field_values, RCURLY)
 
     @rule
-    def field_values(self):
+    def field_values(self) -> Rule:
         return (
             self.field_value
             | seq(self.field_value, COMMA)
@@ -376,7 +376,7 @@ class FineGrammar(Grammar):
         )
 
     @rule
-    def field_value(self):
+    def field_value(self) -> Rule:
         return IDENTIFIER | seq(IDENTIFIER, COLON, self.expression)
 
 
@@ -533,16 +533,19 @@ import bisect
 class FineTokens:
     def __init__(self, src: str):
         self.src = src
-        self.tokens = list(tokenize(src))
+        self._tokens = list(tokenize(src))
         self.lines = [m.start() for m in re.finditer("\n", src)]
+
+    def tokens(self):
+        return self._tokens
 
     def dump(self, *, start=None, end=None):
         if start is None:
             start = 0
         if end is None:
-            end = len(self.tokens)
+            end = len(self._tokens)
 
-        for token in self.tokens[start:end]:
+        for token in self._tokens[start:end]:
             (kind, start, length) = token
             line_index = bisect.bisect_left(self.lines, start)
             if line_index == 0:
@@ -553,14 +556,3 @@ class FineTokens:
             print(
                 f"{start:04} {kind.value:12} {self.src[start:start+length]} ({line_index}, {column_index})"
             )
-
-
-if __name__ == "__main__":
-    grammar = FineGrammar()
-    table = grammar.build_table(start="expression")
-
-    print(f"{len(table)} states")
-
-    average_entries = sum(len(row) for row in table) / len(table)
-    max_entries = max(len(row) for row in table)
-    print(f"{average_entries} average, {max_entries} max")

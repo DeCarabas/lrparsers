@@ -7,11 +7,12 @@ import select
 import sys
 import termios
 import time
+import traceback
 import tty
+import types
 import typing
 from dataclasses import dataclass
 
-import grammar
 import parser
 
 # from parser import Token, Grammar, rule, seq
@@ -47,7 +48,8 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
     This is not a *great* parser, it's really just a demo for what you can
     do with the table.
     """
-    input: list[str] = [t.value for (t, _, _) in tokens.tokens]
+    input_tokens = tokens.tokens()
+    input: list[str] = [t.value for (t, _, _) in input_tokens]
 
     assert "$" not in input
     input = input + ["$"]
@@ -61,7 +63,7 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
         current_state = stack[-1][0]
         current_token = input[input_index]
 
-        action = table.states[current_state].get(current_token, parser.Error())
+        action = table.actions[current_state].get(current_token, parser.Error())
         if trace:
             trace(stack, input, input_index, action)
 
@@ -84,21 +86,21 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
                 value = Tree(name=name if not transparent else None, children=tuple(children))
                 stack = stack[:-size]
 
-                goto = table.states[stack[-1][0]].get(name, parser.Error())
-                assert isinstance(goto, parser.Goto)
-                stack.append((goto.state, value))
+                goto = table.gotos[stack[-1][0]].get(name)
+                assert goto is not None
+                stack.append((goto, value))
 
             case parser.Shift(state):
                 stack.append((state, current_token))
                 input_index += 1
 
             case parser.Error():
-                if input_index >= len(tokens.tokens):
+                if input_index >= len(input_tokens):
                     message = "Unexpected end of file"
-                    start = tokens.tokens[-1][1]
+                    start = input_tokens[-1][1]
                 else:
                     message = f"Syntax error: unexpected symbol {current_token}"
-                    (_, start, _) = tokens.tokens[input_index]
+                    (_, start, _) = input_tokens[input_index]
 
                 line_index = bisect.bisect_left(tokens.lines, start)
                 if line_index == 0:
@@ -147,7 +149,7 @@ def CSI(x: bytes) -> bytes:
     return ESC(b"[" + x)
 
 
-CLEAR = CSI(b"2J")
+CLEAR = CSI(b"H") + CSI(b"J")
 
 
 def enter_alt_screen():
@@ -158,15 +160,108 @@ def leave_alt_screen():
     sys.stdout.buffer.write(CSI(b"?1049l"))
 
 
+class DynamicModule:
+    file_name: str
+    member_name: str | None
+
+    last_time: float | None
+    module: types.ModuleType | None
+
+    def __init__(self, file_name, member_name):
+        self.file_name = file_name
+        self.member_name = member_name
+
+        self.last_time = None
+        self.module = None
+        self.value = None
+
+    def _predicate(self, member) -> bool:
+        if not inspect.isclass(member):
+            return False
+
+        assert self.module is not None
+        if member.__module__ != self.module.__name__:
+            return False
+
+        return True
+
+    def _transform(self, value):
+        return value
+
+    def get(self):
+        st = os.stat(self.file_name)
+        if self.last_time == st.st_mtime:
+            assert self.value is not None
+            return self.value
+
+        self.value = None
+
+        if self.module is None:
+            mod_name = inspect.getmodulename(self.file_name)
+            if mod_name is None:
+                raise Exception(f"{self.file_name} does not seem to be a module")
+            self.module = importlib.import_module(mod_name)
+        else:
+            importlib.reload(self.module)
+
+        if self.member_name is None:
+            classes = inspect.getmembers(self.module, self._predicate)
+            if len(classes) == 0:
+                raise Exception(f"No grammars found in {self.file_name}")
+            if len(classes) > 1:
+                raise Exception(
+                    f"{len(classes)} grammars found in {self.file_name}: {', '.join(c[0] for c in classes)}"
+                )
+            cls = classes[0][1]
+        else:
+            cls = getattr(self.module, self.member_name)
+            if cls is None:
+                raise Exception(f"Cannot find {self.member_name} in {self.file_name}")
+            if not self._predicate(cls):
+                raise Exception(f"{self.member_name} in {self.file_name} is not suitable")
+
+        self.value = self._transform(cls)
+        self.last_time = st.st_mtime
+        return self.value
+
+
+class DynamicGrammarModule(DynamicModule):
+    def __init__(self, file_name, member_name, start_rule, generator):
+        super().__init__(file_name, member_name)
+
+        self.start_rule = start_rule
+        self.generator = generator
+
+    def _predicate(self, member) -> bool:
+        if not super()._predicate(member):
+            return False
+
+        if getattr(member, "build_table", None):
+            return True
+
+        return False
+
+    def _transform(self, value):
+        return value().build_table(start=self.start_rule, generator=self.generator)
+
+
+class DynamicLexerModule(DynamicModule):
+    def _predicate(self, member) -> bool:
+        if not super()._predicate(member):
+            return False
+
+        if getattr(member, "tokens", None):
+            return True
+
+        return False
+
+
 class Harness:
     source: str | None
     table: parser.ParseTable | None
     tree: Tree | None
 
-    def __init__(self, lexer_func, start_rule, source_path):
-        # self.generator = parser.GenerateLR1
-        self.generator = parser.GenerateLALR
-        self.lexer_func = lexer_func
+    def __init__(self, start_rule, source_path):
         self.start_rule = start_rule
         self.source_path = source_path
 
@@ -176,10 +271,11 @@ class Harness:
         self.tree = None
         self.errors = None
 
-        self.grammar_file_name = "./grammar.py"
-        self.last_grammar_time = None
-        self.grammar_module = None
-        self.grammar_name = None
+        self.grammar_module = DynamicGrammarModule(
+            "./grammar.py", None, self.start_rule, generator=parser.GenerateLALR
+        )
+
+        self.lexer_module = DynamicLexerModule("./grammar.py", None)
 
     def run(self):
         while True:
@@ -191,71 +287,19 @@ class Harness:
 
             self.update()
 
-    #    def should_reload_grammar(self):
-
     def load_grammar(self) -> parser.ParseTable:
-        st = os.stat(self.grammar_file_name)
-        if self.last_grammar_time == st.st_mtime:
-            assert self.table is not None
-            return self.table
-
-        self.table = None
-
-        if self.grammar_module is None:
-            mod_name = inspect.getmodulename(self.grammar_file_name)
-            if mod_name is None:
-                raise Exception(f"{self.grammar_file_name} does not seem to be a module")
-            self.grammar_module = importlib.import_module(mod_name)
-        else:
-            importlib.reload(self.grammar_module)
-
-        def is_grammar(cls):
-            if not inspect.isclass(cls):
-                return False
-
-            assert self.grammar_module is not None
-            if cls.__module__ != self.grammar_module.__name__:
-                return False
-
-            if getattr(cls, "build_table", None):
-                return True
-
-            return False
-
-        if self.grammar_name is None:
-            classes = inspect.getmembers(self.grammar_module, is_grammar)
-            if len(classes) == 0:
-                raise Exception(f"No grammars found in {self.grammar_file_name}")
-            if len(classes) > 1:
-                raise Exception(
-                    f"{len(classes)} grammars found in {self.grammar_file_name}: {', '.join(c[0] for c in classes)}"
-                )
-            grammar_func = classes[0][1]
-        else:
-            cls = getattr(self.grammar_module, self.grammar_name)
-            if cls is None:
-                raise Exception(f"Cannot find {self.grammar_name} in {self.grammar_file_name}")
-            if not is_grammar(cls):
-                raise Exception(
-                    f"{self.grammar_name} in {self.grammar_file_name} does not seem to be a grammar"
-                )
-            grammar_func = cls
-
-        self.table = grammar_func().build_table(start=self.start_rule, generator=self.generator)
-        self.last_grammar_time = st.st_mtime
-
-        assert self.table is not None
-        return self.table
+        return self.grammar_module.get()
 
     def update(self):
         start_time = time.time()
         try:
             table = self.load_grammar()
+            lexer_func = self.lexer_module.get()
 
             with open(self.source_path, "r", encoding="utf-8") as f:
                 self.source = f.read()
 
-                self.tokens = self.lexer_func(self.source)
+                self.tokens = lexer_func(self.source)
                 lex_time = time.time()
 
                 # print(f"{tokens.lines}")
@@ -268,7 +312,9 @@ class Harness:
 
         except Exception as e:
             self.tree = None
-            self.errors = [f"Error loading grammar: {e}"]
+            self.errors = ["Error loading grammar:"] + [
+                "  " + l.rstrip() for fl in traceback.format_exception(e) for l in fl.splitlines()
+            ]
             parse_elapsed = time.time() - start_time
             table = None
 
@@ -276,7 +322,7 @@ class Harness:
         rows, cols = termios.tcgetwinsize(sys.stdout.fileno())
 
         if table is not None:
-            states = table.states
+            states = table.actions
             average_entries = sum(len(row) for row in states) / len(states)
             max_entries = max(len(row) for row in states)
             print(
@@ -320,7 +366,6 @@ if __name__ == "__main__":
         enter_alt_screen()
 
         h = Harness(
-            lexer_func=grammar.FineTokens,
             start_rule="file",
             source_path=source_path,
         )

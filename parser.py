@@ -21,10 +21,10 @@ To get started, create a grammar that derives from the `Grammar` class. Create
 one method per nonterminal, decorated with the `rule` decorator. Here's an
 example:
 
-    PLUS = Token('+')
-    LPAREN = Token('(')
-    RPAREN = Token(')')
-    ID = Token('id')
+    PLUS = Terminal('+')
+    LPAREN = Terminal('(')
+    RPAREN = Terminal(')')
+    ID = Terminal('id')
 
     class SimpleGrammar(Grammar):
         @rule
@@ -411,11 +411,6 @@ class Shift(Action):
 
 
 @dataclasses.dataclass
-class Goto(Action):
-    state: int
-
-
-@dataclasses.dataclass
 class Accept(Action):
     pass
 
@@ -511,8 +506,7 @@ class ErrorCollection:
                         case Accept():
                             action_str = "accept the parse"
                         case _:
-                            assert isinstance(action, Goto)
-                            raise Exception("Shouldn't conflict on goto ever")
+                            raise Exception(f"unknown action type {action}")
 
                     lines.append(
                         f"  - We are in the rule `{name}: {rule}` and we should {action_str}"
@@ -525,7 +519,53 @@ class ErrorCollection:
 
 @dataclasses.dataclass
 class ParseTable:
-    states: list[dict[str, Action]]
+    actions: list[dict[str, Action]]
+    gotos: list[dict[str, int]]
+
+    def format(self):
+        """Format a parser table so pretty."""
+
+        def format_action(actions: dict[str, Action], terminal: str):
+            action = actions.get(terminal)
+            match action:
+                case Accept():
+                    return "accept"
+                case Shift(state=state):
+                    return f"s{state}"
+                case Reduce(count=count):
+                    return f"r{count}"
+                case _:
+                    return ""
+
+        def format_goto(gotos: dict[str, int], nt: str):
+            index = gotos.get(nt)
+            if index is None:
+                return ""
+            else:
+                return str(index)
+
+        terminals = list(sorted({k for row in self.actions for k in row.keys()}))
+        nonterminals = list(sorted({k for row in self.gotos for k in row.keys()}))
+
+        header = "     | {terms} | {nts}".format(
+            terms=" ".join(f"{terminal: <6}" for terminal in terminals),
+            nts=" ".join(f"{nt: <5}" for nt in nonterminals),
+        )
+
+        lines = [
+            header,
+            "-" * len(header),
+        ] + [
+            "{index: <4} | {actions} | {gotos}".format(
+                index=i,
+                actions=" ".join(
+                    "{0: <6}".format(format_action(actions, terminal)) for terminal in terminals
+                ),
+                gotos=" ".join("{0: <5}".format(format_goto(gotos, nt)) for nt in nonterminals),
+            )
+            for i, (actions, gotos) in enumerate(zip(self.actions, self.gotos))
+        ]
+        return "\n".join(lines)
 
 
 class TableBuilder(object):
@@ -536,12 +576,14 @@ class TableBuilder(object):
     """
 
     errors: ErrorCollection
-    table: list[dict[str, Action]]
+    actions: list[dict[str, Action]]
+    gotos: list[dict[str, int]]
     alphabet: list[str]
     precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
     transparents: set[str]
 
-    row: None | list[typing.Tuple[None | Action, None | Configuration]]
+    action_row: None | list[typing.Tuple[None | Action, None | Configuration]]
+    goto_row: None | list[None | int]
 
     def __init__(
         self,
@@ -550,11 +592,14 @@ class TableBuilder(object):
         transparents: set[str],
     ):
         self.errors = ErrorCollection()
-        self.table = []
+        self.actions = []
+        self.gotos = []
+
         self.alphabet = alphabet
         self.precedence = precedence
         self.transparents = transparents
-        self.row = None
+        self.action_row = None
+        self.goto_row = None
 
     def flush(self, all_sets: ConfigurationSetInfo) -> ParseTable:
         """Finish building the table and return it.
@@ -565,20 +610,31 @@ class TableBuilder(object):
         if self.errors.any():
             errors = self.errors.format(self.alphabet, all_sets)
             raise ValueError(f"Errors building the table:\n\n{errors}")
-        return ParseTable(states=self.table)
+        return ParseTable(actions=self.actions, gotos=self.gotos)
 
     def new_row(self, config_set: ConfigSet):
         """Start a new row, processing the given config set. Call this before
         doing anything else.
         """
         self._flush_row()
-        self.row = [(None, None) for _ in self.alphabet]
+        self.action_row = [(None, None) for _ in self.alphabet]
+        self.goto_row = [None for _ in self.alphabet]
         self.current_config_set = config_set
 
     def _flush_row(self):
-        if self.row:
-            actions = {self.alphabet[k]: v[0] for k, v in enumerate(self.row) if v[0] is not None}
-            self.table.append(actions)
+        if self.action_row:
+            actions = {
+                self.alphabet[sym]: e[0]
+                for sym, e in enumerate(self.action_row)
+                if e[0] is not None
+            }
+
+            self.actions.append(actions)
+
+        if self.goto_row:
+            gotos = {self.alphabet[sym]: e for sym, e in enumerate(self.goto_row) if e is not None}
+
+            self.gotos.append(gotos)
 
     def set_table_reduce(self, symbol: int, config: Configuration):
         """Mark a reduce of the given configuration for the given symbol in the
@@ -604,7 +660,9 @@ class TableBuilder(object):
 
     def set_table_goto(self, symbol: int, index: int):
         """Set the goto for the given nonterminal symbol in the current row."""
-        self._set_table_action(symbol, Goto(index), None)
+        assert self.goto_row is not None
+        assert self.goto_row[symbol] is None  # ?
+        self.goto_row[symbol] = index
 
     def _action_precedence(self, symbol: int, action: Action, config: Configuration):
         if isinstance(action, Shift):
@@ -620,8 +678,8 @@ class TableBuilder(object):
         """
         assert isinstance(symbol_id, int)
 
-        assert self.row is not None
-        existing, existing_config = self.row[symbol_id]
+        assert self.action_row is not None
+        existing, existing_config = self.action_row[symbol_id]
         if existing is not None and existing != action:
             assert existing_config is not None
             assert config is not None
@@ -675,7 +733,7 @@ class TableBuilder(object):
                 # action, just allow the overwrite with no change.
                 pass
 
-        self.row[symbol_id] = (action, config)
+        self.action_row[symbol_id] = (action, config)
 
 
 class GenerateLR0:
@@ -1036,7 +1094,7 @@ def parse(table: ParseTable, input, trace=False):
         current_state = stack[-1][0]
         current_token = input[input_index]
 
-        action = table.states[current_state].get(current_token, Error())
+        action = table.actions[current_state].get(current_token, Error())
         if trace:
             print(
                 "{stack: <20}  {input: <50}  {action: <5}".format(
@@ -1061,9 +1119,9 @@ def parse(table: ParseTable, input, trace=False):
                 value = (name if not transparent else None, tuple(children))
                 stack = stack[:-size]
 
-                goto = table.states[stack[-1][0]].get(name, Error())
-                assert isinstance(goto, Goto)
-                stack.append((goto.state, value))
+                goto = table.gotos[stack[-1][0]].get(name)
+                assert goto is not None
+                stack.append((goto, value))
 
             case Shift(state):
                 stack.append((state, (current_token, ())))
@@ -1554,7 +1612,7 @@ class Rule:
         return SequenceRule(self, other)
 
     @abc.abstractmethod
-    def flatten(self) -> typing.Generator[list["str | Token"], None, None]:
+    def flatten(self) -> typing.Generator[list["str | Terminal"], None, None]:
         """Convert this potentially nested and branching set of rules into a
         series of nice, flat symbol lists.
 
@@ -1574,7 +1632,7 @@ class Rule:
         raise NotImplementedError()
 
 
-class Token(Rule):
+class Terminal(Rule):
     """A token, or terminal symbol in the grammar."""
 
     value: str
@@ -1582,7 +1640,7 @@ class Token(Rule):
     def __init__(self, value):
         self.value = sys.intern(value)
 
-    def flatten(self) -> typing.Generator[list["str | Token"], None, None]:
+    def flatten(self) -> typing.Generator[list["str | Terminal"], None, None]:
         # We are just ourselves when flattened.
         yield [self]
 
@@ -1616,7 +1674,7 @@ class NonTerminal(Rule):
         self.name = name or fn.__name__
         self.transparent = transparent
 
-    def generate_body(self, grammar) -> list[list[str | Token]]:
+    def generate_body(self, grammar) -> list[list[str | Terminal]]:
         """Generate the body of the non-terminal.
 
         We do this by first calling the associated function in order to get a
@@ -1625,7 +1683,7 @@ class NonTerminal(Rule):
         """
         return [rule for rule in self.fn(grammar).flatten()]
 
-    def flatten(self) -> typing.Generator[list[str | Token], None, None]:
+    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
         # Although we contain multitudes, when flattened we're being asked in
         # the context of some other production. Yield ourselves, and trust that
         # in time we will be asked to generate our body.
@@ -1639,7 +1697,7 @@ class AlternativeRule(Rule):
         self.left = left
         self.right = right
 
-    def flatten(self) -> typing.Generator[list[str | Token], None, None]:
+    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
         # All the things from the left of the alternative, then all the things
         # from the right, never intermingled.
         yield from self.left.flatten()
@@ -1655,7 +1713,7 @@ class SequenceRule(Rule):
         self.first = first
         self.second = second
 
-    def flatten(self) -> typing.Generator[list[str | Token], None, None]:
+    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
         # All the things in the prefix....
         for first in self.first.flatten():
             # ...potentially followed by all the things in the suffix.
@@ -1668,7 +1726,7 @@ class NothingRule(Rule):
     these, you're probably better off just using the singleton `Nothing`.
     """
 
-    def flatten(self) -> typing.Generator[list[str | Token], None, None]:
+    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
         # It's quiet in here.
         yield []
 
@@ -1720,10 +1778,10 @@ class Grammar:
 
     Here's an example of a simple grammar:
 
-        PLUS = Token('+')
-        LPAREN = Token('(')
-        RPAREN = Token(')')
-        ID = Token('id')
+        PLUS = Terminal('+')
+        LPAREN = Terminal('(')
+        RPAREN = Terminal(')')
+        ID = Terminal('id')
 
         class SimpleGrammar(Grammar):
             @rule
@@ -1745,7 +1803,7 @@ class Grammar:
         precedence_table = {}
         for prec, (associativity, symbols) in enumerate(precedence):
             for symbol in symbols:
-                if isinstance(symbol, Token):
+                if isinstance(symbol, Terminal):
                     key = symbol.value
                 elif isinstance(symbol, NonTerminal):
                     key = symbol.name
@@ -1758,7 +1816,7 @@ class Grammar:
 
     def generate_nonterminal_dict(
         self, start: str
-    ) -> typing.Tuple[dict[str, list[list[str | Token]]], set[str]]:
+    ) -> typing.Tuple[dict[str, list[list[str | Terminal]]], set[str]]:
         """Convert the rules into a dictionary of productions.
 
         Our table generators work on a very flat set of productions. This is the
@@ -1785,7 +1843,7 @@ class Grammar:
             body = rule.generate_body(self)
             for clause in body:
                 for symbol in clause:
-                    if not isinstance(symbol, Token):
+                    if not isinstance(symbol, Terminal):
                         assert isinstance(symbol, str)
                         nonterminal = nonterminals.get(symbol)
                         if nonterminal is None:
@@ -1811,7 +1869,7 @@ class Grammar:
             for clause in clauses:
                 new_clause = []
                 for symbol in clause:
-                    if isinstance(symbol, Token):
+                    if isinstance(symbol, Terminal):
                         new_clause.append(symbol.value)
                     else:
                         new_clause.append(symbol)
@@ -1842,45 +1900,6 @@ def format_node(node):
     return "\n".join(lines)
 
 
-def format_table(generator, table: ParseTable):
-    """Format a parser table so pretty."""
-
-    def format_action(state, terminal):
-        action = state.get(terminal, ("error",))
-        if action[0] == "accept":
-            return "accept"
-        elif action[0] == "shift":
-            return "s" + str(action[1])
-        elif action[0] == "error":
-            return ""
-        elif action[0] == "reduce":
-            return "r" + str(action[1])
-
-    terminals = list(sorted(generator.alphabet[i] for i, v in enumerate(generator.terminal) if v))
-    nonterminals = list(
-        sorted(generator.alphabet[i] for i, v in enumerate(generator.nonterminal) if v)
-    )
-    header = "    | {terms} | {nts}".format(
-        terms=" ".join("{0: <6}".format(terminal) for terminal in terminals),
-        nts=" ".join("{0: <5}".format(nt) for nt in nonterminals),
-    )
-
-    lines = [
-        header,
-        "-" * len(header),
-    ] + [
-        "{index: <3} | {actions} | {gotos}".format(
-            index=i,
-            actions=" ".join(
-                "{0: <6}".format(format_action(row, terminal)) for terminal in terminals
-            ),
-            gotos=" ".join("{0: <5}".format(row.get(nt, ("error", ""))[1]) for nt in nonterminals),
-        )
-        for i, row in enumerate(table.states)
-    ]
-    return "\n".join(lines)
-
-
 ###############################################################################
 # Examples
 ###############################################################################
@@ -1901,7 +1920,7 @@ def examples():
 
     gen = GenerateLR0("E", grammar_simple)
     table = gen.gen_table()
-    print(format_table(gen, table))
+    print(table.format())
     tree = parse(table, ["id", "+", "(", "id", ")"])
     print(format_node(tree) + "\n")
     print()
@@ -1954,7 +1973,7 @@ def examples():
     gen = GenerateSLR1("E", grammar_lr0_shift_reduce)
     print(f"Follow('E'): {str([gen.alphabet[f] for f in gen.gen_follow(gen.symbol_key['E'])])}")
     table = gen.gen_table()
-    print(format_table(gen, table))
+    print(table.format())
     tree = parse(table, ["id", "+", "(", "id", "[", "id", "]", ")"], trace=True)
     print(format_node(tree) + "\n")
     print()
@@ -1985,7 +2004,7 @@ def examples():
     ]
     gen = GenerateLR1("S", grammar_aho_ullman_2)
     table = gen.gen_table()
-    print(format_table(gen, table))
+    print(table.format())
     parse(table, ["b", "a", "a", "b"], trace=True)
     print()
 
@@ -1993,7 +2012,7 @@ def examples():
     print("grammar_aho_ullman_2 (LALR):")
     gen = GenerateLALR("S", grammar_aho_ullman_2)
     table = gen.gen_table()
-    print(format_table(gen, table))
+    print(table.format())
     print()
 
     # A fun LALAR grammar.
@@ -2009,7 +2028,7 @@ def examples():
     ]
     gen = GenerateLALR("S", grammar_lalr)
     table = gen.gen_table()
-    print(format_table(gen, table))
+    print(table.format())
     print()
 
 
