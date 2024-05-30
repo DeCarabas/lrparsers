@@ -38,6 +38,8 @@ class TokenValue:
 @dataclass
 class Tree:
     name: str | None
+    start: int
+    end: int
     children: typing.Tuple["Tree | TokenValue", ...]
 
 
@@ -90,7 +92,12 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
                     else:
                         children.append(c)
 
-                value = Tree(name=name if not transparent else None, children=tuple(children))
+                value = Tree(
+                    name=name if not transparent else None,
+                    start=children[0].start,
+                    end=children[-1].end,
+                    children=tuple(children),
+                )
                 stack = stack[:-size]
 
                 goto = table.gotos[stack[-1][0]].get(name)
@@ -355,14 +362,14 @@ class Harness:
     def format_node(self, lines, node: Tree | TokenValue, indent=0):
         """Print out an indented concrete syntax tree, from parse()."""
         match node:
-            case Tree(name, children):
-                lines.append((" " * indent) + (name or "???"))
+            case Tree(name=name, start=start, end=end, children=children):
+                lines.append((" " * indent) + f"{name or '???'} [{start}, {end})")
                 for child in children:
                     self.format_node(lines, child, indent + 2)
             case TokenValue(kind=kind, start=start, end=end):
                 assert self.source is not None
                 value = self.source[start:end]
-                lines.append((" " * indent) + f"{kind}:'{value}'")
+                lines.append((" " * indent) + f"{kind}:'{value}' [{start}, {end})")
 
 
 if __name__ == "__main__":
