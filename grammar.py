@@ -82,10 +82,10 @@ class FineGrammar(Grammar):
 
     @rule
     def _file_statement_list(self):
-        return self.file_statement | (self._file_statement_list + self.file_statement)
+        return self._file_statement | (self._file_statement_list + self._file_statement)
 
     @rule
-    def file_statement(self):
+    def _file_statement(self):
         return (
             self.import_statement | self.class_declaration | self.export_statement | self.statement
         )
@@ -100,14 +100,14 @@ class FineGrammar(Grammar):
 
     @rule
     def class_body(self):
-        return seq(LCURLY, RCURLY) | seq(LCURLY, self.class_members, RCURLY)
+        return seq(LCURLY, RCURLY) | seq(LCURLY, self._class_members, RCURLY)
 
     @rule
-    def class_members(self):
-        return self.class_member | seq(self.class_members, self.class_member)
+    def _class_members(self):
+        return self._class_member | seq(self._class_members, self._class_member)
 
     @rule
-    def class_member(self):
+    def _class_member(self):
         return self.field_declaration | self.function_declaration
 
     @rule

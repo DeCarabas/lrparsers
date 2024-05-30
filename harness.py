@@ -1,11 +1,15 @@
 import bisect
-from dataclasses import dataclass
+import importlib
+import inspect
 import enum
+import os
 import select
 import sys
 import termios
+import time
 import tty
 import typing
+from dataclasses import dataclass
 
 import grammar
 import parser
@@ -143,7 +147,7 @@ def CSI(x: bytes) -> bytes:
     return ESC(b"[" + x)
 
 
-CLEAR = CSI(b"H") + CSI(b"0m")
+CLEAR = CSI(b"2J")
 
 
 def enter_alt_screen():
@@ -159,11 +163,10 @@ class Harness:
     table: parser.ParseTable | None
     tree: Tree | None
 
-    def __init__(self, lexer_func, grammar_func, start_rule, source_path):
+    def __init__(self, lexer_func, start_rule, source_path):
         # self.generator = parser.GenerateLR1
         self.generator = parser.GenerateLALR
         self.lexer_func = lexer_func
-        self.grammar_func = grammar_func
         self.start_rule = start_rule
         self.source_path = source_path
 
@@ -172,6 +175,11 @@ class Harness:
         self.tokens = None
         self.tree = None
         self.errors = None
+
+        self.grammar_file_name = "./grammar.py"
+        self.last_grammar_time = None
+        self.grammar_module = None
+        self.grammar_name = None
 
     def run(self):
         while True:
@@ -183,38 +191,108 @@ class Harness:
 
             self.update()
 
-    def update(self):
-        if self.table is None:
-            self.table = self.grammar_func().build_table(
-                start=self.start_rule, generator=self.generator
-            )
-        assert self.table is not None
+    #    def should_reload_grammar(self):
 
-        if self.tokens is None:
+    def load_grammar(self) -> parser.ParseTable:
+        st = os.stat(self.grammar_file_name)
+        if self.last_grammar_time == st.st_mtime:
+            assert self.table is not None
+            return self.table
+
+        self.table = None
+
+        if self.grammar_module is None:
+            mod_name = inspect.getmodulename(self.grammar_file_name)
+            if mod_name is None:
+                raise Exception(f"{self.grammar_file_name} does not seem to be a module")
+            self.grammar_module = importlib.import_module(mod_name)
+        else:
+            importlib.reload(self.grammar_module)
+
+        def is_grammar(cls):
+            if not inspect.isclass(cls):
+                return False
+
+            assert self.grammar_module is not None
+            if cls.__module__ != self.grammar_module.__name__:
+                return False
+
+            if getattr(cls, "build_table", None):
+                return True
+
+            return False
+
+        if self.grammar_name is None:
+            classes = inspect.getmembers(self.grammar_module, is_grammar)
+            if len(classes) == 0:
+                raise Exception(f"No grammars found in {self.grammar_file_name}")
+            if len(classes) > 1:
+                raise Exception(
+                    f"{len(classes)} grammars found in {self.grammar_file_name}: {', '.join(c[0] for c in classes)}"
+                )
+            grammar_func = classes[0][1]
+        else:
+            cls = getattr(self.grammar_module, self.grammar_name)
+            if cls is None:
+                raise Exception(f"Cannot find {self.grammar_name} in {self.grammar_file_name}")
+            if not is_grammar(cls):
+                raise Exception(
+                    f"{self.grammar_name} in {self.grammar_file_name} does not seem to be a grammar"
+                )
+            grammar_func = cls
+
+        self.table = grammar_func().build_table(start=self.start_rule, generator=self.generator)
+        self.last_grammar_time = st.st_mtime
+
+        assert self.table is not None
+        return self.table
+
+    def update(self):
+        start_time = time.time()
+        try:
+            table = self.load_grammar()
+
             with open(self.source_path, "r", encoding="utf-8") as f:
                 self.source = f.read()
-            self.tokens = self.lexer_func(self.source)
 
-        # print(f"{tokens.lines}")
-        # tokens.dump(end=5)
-        if self.tree is None and self.errors is None:
-            (tree, errors) = parse(self.table, self.tokens, trace=None)
-            self.tree = tree
-            self.errors = errors
+                self.tokens = self.lexer_func(self.source)
+                lex_time = time.time()
+
+                # print(f"{tokens.lines}")
+                # tokens.dump(end=5)
+                (tree, errors) = parse(table, self.tokens, trace=None)
+                parse_time = time.time()
+                self.tree = tree
+                self.errors = errors
+                parse_elapsed = parse_time - lex_time
+
+        except Exception as e:
+            self.tree = None
+            self.errors = [f"Error loading grammar: {e}"]
+            parse_elapsed = time.time() - start_time
+            table = None
 
         sys.stdout.buffer.write(CLEAR)
         rows, cols = termios.tcgetwinsize(sys.stdout.fileno())
 
-        states = self.table.states
-        average_entries = sum(len(row) for row in states) / len(states)
-        max_entries = max(len(row) for row in states)
-        print(f"{len(states)} states - {average_entries} average, {max_entries} max\r")
+        if table is not None:
+            states = table.states
+            average_entries = sum(len(row) for row in states) / len(states)
+            max_entries = max(len(row) for row in states)
+            print(
+                f"{len(states)} states - {average_entries:.3} average, {max_entries} max - {parse_elapsed:.3}s      \r"
+            )
+        else:
+            print("No table\r\n")
 
         if self.tree is not None:
             lines = []
             self.format_node(lines, self.tree)
             for line in lines[: rows - 2]:
                 print(line[:cols] + "\r")
+        else:
+            for error in self.errors[: rows - 2]:
+                print(error[:cols] + "\r")
 
         sys.stdout.flush()
         sys.stdout.buffer.flush()
@@ -243,7 +321,6 @@ if __name__ == "__main__":
 
         h = Harness(
             lexer_func=grammar.FineTokens,
-            grammar_func=grammar.FineGrammar,
             start_rule="file",
             source_path=source_path,
         )
