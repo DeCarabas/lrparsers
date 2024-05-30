@@ -29,9 +29,16 @@ def trace_state(stack, input, input_index, action):
 
 
 @dataclass
+class TokenValue:
+    kind: str
+    start: int
+    end: int
+
+
+@dataclass
 class Tree:
     name: str | None
-    children: typing.Tuple["Tree | str", ...]
+    children: typing.Tuple["Tree | TokenValue", ...]
 
 
 def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | None, list[str]]:
@@ -58,7 +65,7 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
     # Our stack is a stack of tuples, where the first entry is the state number
     # and the second entry is the 'value' that was generated when the state was
     # pushed.
-    stack: list[typing.Tuple[int, str | Tree | None]] = [(0, None)]
+    stack: list[typing.Tuple[int, TokenValue | Tree | None]] = [(0, None)]
     while True:
         current_state = stack[-1][0]
         current_token = input[input_index]
@@ -74,7 +81,7 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
                 return (result, [])
 
             case parser.Reduce(name=name, count=size, transparent=transparent):
-                children: list[str | Tree] = []
+                children: list[TokenValue | Tree] = []
                 for _, c in stack[-size:]:
                     if c is None:
                         continue
@@ -91,7 +98,9 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
                 stack.append((goto, value))
 
             case parser.Shift(state):
-                stack.append((state, current_token))
+                (kind, start, length) = input_tokens[input_index]
+                tval = TokenValue(kind=kind.value, start=start, end=start + length)
+                stack.append((state, tval))
                 input_index += 1
 
             case parser.Error():
@@ -343,15 +352,17 @@ class Harness:
         sys.stdout.flush()
         sys.stdout.buffer.flush()
 
-    def format_node(self, lines, node: Tree | str, indent=0):
+    def format_node(self, lines, node: Tree | TokenValue, indent=0):
         """Print out an indented concrete syntax tree, from parse()."""
         match node:
             case Tree(name, children):
                 lines.append((" " * indent) + (name or "???"))
                 for child in children:
                     self.format_node(lines, child, indent + 2)
-            case _:
-                lines.append((" " * indent) + str(node))
+            case TokenValue(kind=kind, start=start, end=end):
+                assert self.source is not None
+                value = self.source[start:end]
+                lines.append((" " * indent) + f"{kind}:'{value}'")
 
 
 if __name__ == "__main__":

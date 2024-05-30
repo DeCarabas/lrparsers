@@ -553,6 +553,5 @@ class FineTokens:
             else:
                 col_start = self.lines[line_index - 1] + 1
             column_index = start - col_start
-            print(
-                f"{start:04} {kind.value:12} {self.src[start:start+length]} ({line_index}, {column_index})"
-            )
+            value = self.src[start : start + length]
+            print(f"{start:04} {kind.value:12} {value} ({line_index}, {column_index})")
