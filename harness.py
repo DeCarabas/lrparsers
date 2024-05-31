@@ -289,13 +289,21 @@ class DynamicLexerModule(DynamicModule):
 
 class Harness:
     grammar_file: str
+    grammar_member: str | None
+    lexer_file: str
+    lexer_member: str | None
     start_rule: str | None
     source: str | None
     table: parser.ParseTable | None
     tree: Tree | None
 
-    def __init__(self, grammar_file, start_rule, source_path):
+    def __init__(
+        self, grammar_file, grammar_member, lexer_file, lexer_member, start_rule, source_path
+    ):
         self.grammar_file = grammar_file
+        self.grammar_member = grammar_member
+        self.lexer_file = lexer_file or grammar_file
+        self.lexer_member = lexer_member
         self.start_rule = start_rule
         self.source_path = source_path
 
@@ -310,10 +318,10 @@ class Harness:
         self.max_entries = 0
 
         self.grammar_module = DynamicGrammarModule(
-            self.grammar_file, None, self.start_rule, generator=parser.GenerateLALR
+            self.grammar_file, self.grammar_member, self.start_rule, generator=parser.GenerateLALR
         )
 
-        self.lexer_module = DynamicLexerModule(self.grammar_file, None)
+        self.lexer_module = DynamicLexerModule(self.lexer_file, self.lexer_member)
 
     def run(self):
         while True:
@@ -420,6 +428,21 @@ def main(args: list[str]):
         help="The name of the production to start parsing with. The default is the one "
         "specified by the grammar.",
     )
+    parser.add_argument(
+        "--lexer",
+        type=str,
+        default=None,
+        help="Path to a python file containing the lexer to load. The default is to use the "
+        "grammar file.",
+    )
+    parser.add_argument(
+        "--lexer-member",
+        type=str,
+        default=None,
+        help="The name of the lexer in the lexer module to load. The default is to search "
+        "the module for a class that looks like a lexer. You should only need to specify this "
+        "if you have more than one Lexer in the file, or if your lexer is hidden somehow.",
+    )
 
     parsed = parser.parse_args(args[1:])
 
@@ -431,6 +454,9 @@ def main(args: list[str]):
 
         h = Harness(
             grammar_file=parsed.grammar,
+            grammar_member=parsed.grammar_member,
+            lexer_file=parsed.lexer,
+            lexer_member=parsed.lexer_member,
             start_rule=parsed.start_rule,
             source_path=parsed.source_path,
         )
