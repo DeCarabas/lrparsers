@@ -7,6 +7,7 @@ import os
 import select
 import sys
 import termios
+import textwrap
 import time
 import traceback
 import tty
@@ -390,8 +391,10 @@ class Harness:
             for line in lines[: rows - 3]:
                 print(line[:cols] + "\r")
         else:
-            for error in self.errors[: rows - 3]:
-                print(error[:cols] + "\r")
+            wrapper = textwrap.TextWrapper(width=cols)
+            lines = [line for error in self.errors for line in wrapper.wrap(error)]
+            for line in lines[: rows - 3]:
+                print(line + "\r")
 
         sys.stdout.flush()
         sys.stdout.buffer.flush()
