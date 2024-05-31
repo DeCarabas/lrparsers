@@ -1,3 +1,4 @@
+import argparse
 import bisect
 import importlib
 import inspect
@@ -287,11 +288,14 @@ class DynamicLexerModule(DynamicModule):
 
 
 class Harness:
+    grammar_file: str
+    start_rule: str | None
     source: str | None
     table: parser.ParseTable | None
     tree: Tree | None
 
-    def __init__(self, start_rule, source_path):
+    def __init__(self, grammar_file, start_rule, source_path):
+        self.grammar_file = grammar_file
         self.start_rule = start_rule
         self.source_path = source_path
 
@@ -299,13 +303,17 @@ class Harness:
         self.table = None
         self.tokens = None
         self.tree = None
-        self.errors = None
+        self.errors = []
+
+        self.state_count = 0
+        self.average_entries = 0
+        self.max_entries = 0
 
         self.grammar_module = DynamicGrammarModule(
-            "./grammar.py", None, self.start_rule, generator=parser.GenerateLALR
+            self.grammar_file, None, self.start_rule, generator=parser.GenerateLALR
         )
 
-        self.lexer_module = DynamicLexerModule("./grammar.py", None)
+        self.lexer_module = DynamicLexerModule(self.grammar_file, None)
 
     def run(self):
         while True:
@@ -316,6 +324,7 @@ class Harness:
                 return
 
             self.update()
+            self.render()
 
     def load_grammar(self) -> parser.ParseTable:
         return self.grammar_module.get()
@@ -329,45 +338,51 @@ class Harness:
             with open(self.source_path, "r", encoding="utf-8") as f:
                 self.source = f.read()
 
-                self.tokens = lexer_func(self.source)
-                lex_time = time.time()
+            self.tokens = lexer_func(self.source)
+            lex_time = time.time()
 
-                # print(f"{tokens.lines}")
-                # tokens.dump(end=5)
-                (tree, errors) = parse(table, self.tokens, trace=None)
-                parse_time = time.time()
-                self.tree = tree
-                self.errors = errors
-                parse_elapsed = parse_time - lex_time
+            # print(f"{tokens.lines}")
+            # tokens.dump(end=5)
+            (tree, errors) = parse(table, self.tokens, trace=None)
+            parse_time = time.time()
+            self.tree = tree
+            self.errors = errors
+            self.parse_elapsed = parse_time - lex_time
+
+            states = table.actions
+            self.state_count = len(states)
+            self.average_entries = sum(len(row) for row in states) / len(states)
+            self.max_entries = max(len(row) for row in states)
 
         except Exception as e:
             self.tree = None
             self.errors = ["Error loading grammar:"] + [
                 "  " + l.rstrip() for fl in traceback.format_exception(e) for l in fl.splitlines()
             ]
-            parse_elapsed = time.time() - start_time
-            table = None
+            self.parse_elapsed = time.time() - start_time
+            self.state_count = 0
+            self.average_entries = 0
+            self.max_entries = 0
 
+    def render(self):
         sys.stdout.buffer.write(CLEAR)
         rows, cols = termios.tcgetwinsize(sys.stdout.fileno())
 
-        if table is not None:
-            states = table.actions
-            average_entries = sum(len(row) for row in states) / len(states)
-            max_entries = max(len(row) for row in states)
+        if self.state_count > 0:
             print(
-                f"{len(states)} states - {average_entries:.3} average, {max_entries} max - {parse_elapsed:.3}s      \r"
+                f"{self.state_count} states - {self.average_entries:.3} average, {self.max_entries} max - {self.parse_elapsed:.3}s\r"
             )
         else:
-            print("No table\r\n")
+            print(f"No table\r")
+        print(("\u2500" * cols) + "\r")
 
         if self.tree is not None:
             lines = []
             self.format_node(lines, self.tree)
-            for line in lines[: rows - 2]:
+            for line in lines[: rows - 3]:
                 print(line[:cols] + "\r")
         else:
-            for error in self.errors[: rows - 2]:
+            for error in self.errors[: rows - 3]:
                 print(error[:cols] + "\r")
 
         sys.stdout.flush()
@@ -386,10 +401,27 @@ class Harness:
                 lines.append((" " * indent) + f"{kind}:'{value}' [{start}, {end})")
 
 
-if __name__ == "__main__":
-    source_path = None
-    if len(sys.argv) == 2:
-        source_path = sys.argv[1]
+def main(args: list[str]):
+    parser = argparse.ArgumentParser(description="An interactive debugging harness for grammars")
+    parser.add_argument("grammar", help="Path to a python file containing the grammar to load")
+    parser.add_argument("source_path", help="Path to an input file to parse")
+    parser.add_argument(
+        "--grammar-member",
+        type=str,
+        default=None,
+        help="The name of the member in the grammar module to load. The default is to search "
+        "the module for a class that looks like a Grammar. You should only need to specify "
+        "this if you have more than one grammar in your module, or if it's hidden somehow.",
+    )
+    parser.add_argument(
+        "--start-rule",
+        type=str,
+        default=None,
+        help="The name of the production to start parsing with. The default is the one "
+        "specified by the grammar.",
+    )
+
+    parsed = parser.parse_args(args[1:])
 
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -398,8 +430,9 @@ if __name__ == "__main__":
         enter_alt_screen()
 
         h = Harness(
-            start_rule="File",
-            source_path=source_path,
+            grammar_file=parsed.grammar,
+            start_rule=parsed.start_rule,
+            source_path=parsed.source_path,
         )
         h.run()
 
@@ -407,6 +440,6 @@ if __name__ == "__main__":
         leave_alt_screen()
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
-    # print(parser_faster.format_table(gen, table))
-    # print()
-    # tree = parse(table, ["id", "+", "(", "id", "[", "id", "]", ")"])
+
+if __name__ == "__main__":
+    main(sys.argv)
