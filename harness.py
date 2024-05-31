@@ -18,6 +18,11 @@ import parser
 # from parser import Token, Grammar, rule, seq
 
 
+###############################################################################
+# Parsing Stuff
+###############################################################################
+
+
 def trace_state(stack, input, input_index, action):
     print(
         "{stack: <20}  {input: <50}  {action: <5}".format(
@@ -133,6 +138,10 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
                 raise ValueError(f"Unknown action type: {action}")
 
 
+###############################################################################
+# Screen Stuff
+###############################################################################
+
 # https://en.wikipedia.org/wiki/ANSI_escape_code
 # https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797
 
@@ -174,6 +183,11 @@ def enter_alt_screen():
 
 def leave_alt_screen():
     sys.stdout.buffer.write(CSI(b"?1049l"))
+
+
+###############################################################################
+# Dynamic Modules: Detect and Reload Modules when they Change
+###############################################################################
 
 
 class DynamicModule:
@@ -384,7 +398,7 @@ if __name__ == "__main__":
         enter_alt_screen()
 
         h = Harness(
-            start_rule="file",
+            start_rule="File",
             source_path=source_path,
         )
         h.run()

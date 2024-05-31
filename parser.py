@@ -1745,15 +1745,19 @@ def seq(*args: Rule) -> Rule:
     return result
 
 
-# @typing.overload
-# def rule(f: None | str = None) -> typing.Callable[[typing.Callable], Rule]: ...
+@typing.overload
+def rule(f: typing.Callable, /) -> Rule: ...
 
 
-# @typing.overload
-# def rule(f: typing.Callable) -> Rule: ...
+@typing.overload
+def rule(
+    name: str | None = None, transparent: bool | None = None
+) -> typing.Callable[[typing.Callable[[typing.Any], Rule]], Rule]: ...
 
 
-def rule(f: typing.Callable) -> Rule:
+def rule(
+    name: str | None | typing.Callable = None, transparent: bool | None = None
+) -> Rule | typing.Callable[[typing.Callable[[typing.Any], Rule]], Rule]:
     """The decorator that marks a method in a Grammar object as a nonterminal
     rule.
 
@@ -1761,9 +1765,23 @@ def rule(f: typing.Callable) -> Rule:
     If called with one argument, that argument is a name that overrides the name
     of the nonterminal, which defaults to the name of the function.
     """
-    name = f.__name__
-    transparent = name.startswith("_")
-    return NonTerminal(f, name, transparent)
+    if callable(name):
+        return rule()(name)
+
+    def wrapper(f: typing.Callable[[typing.Any], Rule]):
+        nonlocal name
+        nonlocal transparent
+
+        if name is None:
+            name = f.__name__
+        assert isinstance(name, str)
+
+        if transparent is None:
+            transparent = name.startswith("_")
+
+        return NonTerminal(f, name, transparent)
+
+    return wrapper
 
 
 PrecedenceList = list[typing.Tuple[Assoc, list[Rule]]]

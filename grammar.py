@@ -76,7 +76,7 @@ class FineGrammar(Grammar):
             ]
         )
 
-    @rule
+    @rule("File")
     def file(self) -> Rule:
         return self._file_statement_list
 
@@ -94,7 +94,7 @@ class FineGrammar(Grammar):
     def import_statement(self) -> Rule:
         return seq(IMPORT, STRING, AS, IDENTIFIER, SEMICOLON)
 
-    @rule
+    @rule("ClassDeclaration")
     def class_declaration(self) -> Rule:
         return seq(CLASS, IDENTIFIER, self.class_body)
 
