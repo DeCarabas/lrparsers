@@ -75,6 +75,11 @@ class FineGrammar(Grammar):
                 # statement or an expression, prefer the statement.
                 #
                 (Assoc.NONE, [self.if_statement]),
+                #
+                # If there's confusion about whether to make an IS expression
+                # or something else, prefer IS.
+                #
+                (Assoc.NONE, [self.is_expression]),
             ],
         )
 
@@ -224,59 +229,32 @@ class FineGrammar(Grammar):
         return seq(self.expression, SEMICOLON)
 
     # Expressions
-    @rule
+    @rule(transparent=True)
     def expression(self) -> Rule:
-        return self.assignment_expression
+        return self.binary_expression | self.is_expression | self.primary_expression
 
-    @rule
-    def assignment_expression(self) -> Rule:
-        return seq(self.or_expression, EQUAL, self.assignment_expression) | self.or_expression
+    @rule("BinaryExpression")
+    def binary_expression(self) -> Rule:
+        return (
+            seq(self.expression, EQUAL, self.expression)
+            | seq(self.expression, OR, self.expression)
+            | seq(self.expression, IS, self.pattern)
+            | seq(self.expression, AND, self.expression)
+            | seq(self.expression, EQUALEQUAL, self.expression)
+            | seq(self.expression, BANGEQUAL, self.expression)
+            | seq(self.expression, LESS, self.expression)
+            | seq(self.expression, LESSEQUAL, self.expression)
+            | seq(self.expression, GREATER, self.expression)
+            | seq(self.expression, GREATEREQUAL, self.expression)
+            | seq(self.expression, PLUS, self.expression)
+            | seq(self.expression, MINUS, self.expression)
+            | seq(self.expression, STAR, self.expression)
+            | seq(self.expression, SLASH, self.expression)
+        )
 
-    @rule
-    def or_expression(self) -> Rule:
-        return seq(self.or_expression, OR, self.is_expression) | self.is_expression
-
-    @rule
+    @rule("IsExpression")
     def is_expression(self) -> Rule:
-        return seq(self.is_expression, IS, self.pattern) | self.and_expression
-
-    @rule
-    def and_expression(self) -> Rule:
-        return seq(self.and_expression, AND, self.equality_expression) | self.equality_expression
-
-    @rule
-    def equality_expression(self) -> Rule:
-        return (
-            seq(self.equality_expression, EQUALEQUAL, self.relation_expression)
-            | seq(self.equality_expression, BANGEQUAL, self.relation_expression)
-            | self.relation_expression
-        )
-
-    @rule
-    def relation_expression(self) -> Rule:
-        return (
-            seq(self.relation_expression, LESS, self.additive_expression)
-            | seq(self.relation_expression, LESSEQUAL, self.additive_expression)
-            | seq(self.relation_expression, GREATER, self.additive_expression)
-            | seq(self.relation_expression, GREATEREQUAL, self.additive_expression)
-            | self.additive_expression
-        )
-
-    @rule
-    def additive_expression(self) -> Rule:
-        return (
-            seq(self.additive_expression, PLUS, self.multiplication_expression)
-            | seq(self.additive_expression, MINUS, self.multiplication_expression)
-            | self.multiplication_expression
-        )
-
-    @rule
-    def multiplication_expression(self) -> Rule:
-        return (
-            seq(self.multiplication_expression, STAR, self.primary_expression)
-            | seq(self.multiplication_expression, SLASH, self.primary_expression)
-            | self.primary_expression
-        )
+        return seq(self.expression, IS, self.pattern)
 
     @rule
     def primary_expression(self) -> Rule:
@@ -343,11 +321,15 @@ class FineGrammar(Grammar):
     @rule("Pattern")
     def pattern(self) -> Rule:
         return (
-            seq(self.variable_binding, self._pattern_core, AND, self.and_expression)
+            seq(self.variable_binding, self._pattern_core, self.pattern_predicate)
             | seq(self.variable_binding, self._pattern_core)
-            | seq(self._pattern_core, AND, self.and_expression)
+            | seq(self._pattern_core, self.pattern_predicate)
             | self._pattern_core
         )
+
+    @rule(transparent=True)
+    def pattern_predicate(self) -> Rule:
+        return seq(AND, self.expression)
 
     @rule
     def _pattern_core(self) -> Rule:
