@@ -54,8 +54,10 @@ RSQUARE = Terminal("RightBracket")
 
 
 class FineGrammar(Grammar):
+
     def __init__(self):
         super().__init__(
+            start="File",
             precedence=[
                 (Assoc.RIGHT, [EQUAL]),
                 (Assoc.LEFT, [OR]),
@@ -73,7 +75,7 @@ class FineGrammar(Grammar):
                 # statement or an expression, prefer the statement.
                 #
                 (Assoc.NONE, [self.if_statement]),
-            ]
+            ],
         )
 
     @rule("File")

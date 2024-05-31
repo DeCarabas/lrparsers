@@ -1813,7 +1813,10 @@ class Grammar:
     Not very exciting, perhaps, but it's something.
     """
 
-    def __init__(self, precedence: PrecedenceList | None = None):
+    _precedence: dict[str, typing.Tuple[Assoc, int]]
+    _start: str
+
+    def __init__(self, start: str, precedence: PrecedenceList | None = None):
         if precedence is None:
             precedence = getattr(self, "precedence", [])
         assert precedence is not None
@@ -1831,9 +1834,10 @@ class Grammar:
                 precedence_table[key] = (associativity, prec + 1)
 
         self._precedence = precedence_table
+        self._start = start
 
     def generate_nonterminal_dict(
-        self, start: str
+        self, start: str | None = None
     ) -> typing.Tuple[dict[str, list[list[str | Terminal]]], set[str]]:
         """Convert the rules into a dictionary of productions.
 
@@ -1843,6 +1847,9 @@ class Grammar:
         dictionary that maps nonterminal rule name to its associated list of
         productions.
         """
+        if start is None:
+            start = self._start
+
         rules = inspect.getmembers(self, lambda x: isinstance(x, NonTerminal))
         nonterminals = {rule.name: rule for _, rule in rules}
         transparents = {rule.name for _, rule in rules if rule.transparent}
@@ -1872,7 +1879,9 @@ class Grammar:
 
         return (grammar, transparents)
 
-    def desugar(self, start: str) -> typing.Tuple[list[typing.Tuple[str, list[str]]], set[str]]:
+    def desugar(
+        self, start: str | None = None
+    ) -> typing.Tuple[list[typing.Tuple[str, list[str]]], set[str]]:
         """Convert the rules into a flat list of productions.
 
         Our table generators work from a very flat set of productions. The form
@@ -1896,10 +1905,12 @@ class Grammar:
 
         return grammar, transparents
 
-    def build_table(self, start: str, generator=GenerateLALR):
+    def build_table(self, start: str | None, generator=GenerateLALR):
         """Construct a parse table for this grammar, starting at the named
         nonterminal rule.
         """
+        if start is None:
+            start = self._start
         desugared, transparents = self.desugar(start)
 
         gen = generator(start, desugared, precedence=self._precedence, transparents=transparents)
