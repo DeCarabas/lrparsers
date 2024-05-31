@@ -96,10 +96,10 @@ class FineGrammar(Grammar):
 
     @rule("ClassDeclaration")
     def class_declaration(self) -> Rule:
-        return seq(CLASS, IDENTIFIER, self.class_body)
+        return seq(CLASS, IDENTIFIER, self._class_body)
 
     @rule
-    def class_body(self) -> Rule:
+    def _class_body(self) -> Rule:
         return seq(LCURLY, RCURLY) | seq(LCURLY, self._class_members, RCURLY)
 
     @rule
@@ -110,20 +110,20 @@ class FineGrammar(Grammar):
     def _class_member(self) -> Rule:
         return self.field_declaration | self.function_declaration
 
-    @rule
+    @rule("FieldDecl")
     def field_declaration(self) -> Rule:
         return seq(IDENTIFIER, COLON, self.type_expression, SEMICOLON)
 
     # Types
-    @rule
+    @rule("TypeExpression")
     def type_expression(self) -> Rule:
         return self.alternate_type | self.type_identifier
 
-    @rule
+    @rule("AlternateType")
     def alternate_type(self) -> Rule:
         return seq(self.type_expression, OR, self.type_identifier)
 
-    @rule
+    @rule("TypeIdentifier")
     def type_identifier(self) -> Rule:
         return IDENTIFIER
 
@@ -141,34 +141,34 @@ class FineGrammar(Grammar):
         return Nothing | IDENTIFIER | seq(IDENTIFIER, COMMA, self.export_list)
 
     # Functions
-    @rule
+    @rule("FunctionDecl")
     def function_declaration(self) -> Rule:
         return seq(FUN, IDENTIFIER, self.function_parameters, self.block) | seq(
             FUN, IDENTIFIER, self.function_parameters, ARROW, self.type_expression, self.block
         )
 
-    @rule
+    @rule("ParamList")
     def function_parameters(self) -> Rule:
         return (
             seq(LPAREN, RPAREN)
-            | seq(LPAREN, self.first_parameter, RPAREN)
-            | seq(LPAREN, self.first_parameter, COMMA, self.parameter_list, RPAREN)
+            | seq(LPAREN, self._first_parameter, RPAREN)
+            | seq(LPAREN, self._first_parameter, COMMA, self._parameter_list, RPAREN)
         )
 
     @rule
-    def first_parameter(self) -> Rule:
+    def _first_parameter(self) -> Rule:
         return SELF | self.parameter
 
     @rule
-    def parameter_list(self) -> Rule:
-        return Nothing | self.parameter | seq(self.parameter, COMMA, self.parameter_list)
+    def _parameter_list(self) -> Rule:
+        return Nothing | self.parameter | seq(self.parameter, COMMA, self._parameter_list)
 
-    @rule
+    @rule("Parameter")
     def parameter(self) -> Rule:
         return seq(IDENTIFIER, COLON, self.type_expression)
 
     # Block
-    @rule
+    @rule("Block")
     def block(self) -> Rule:
         return (
             seq(LCURLY, RCURLY)
@@ -193,23 +193,23 @@ class FineGrammar(Grammar):
             | self.expression_statement
         )
 
-    @rule
+    @rule("LetStatement")
     def let_statement(self) -> Rule:
         return seq(LET, IDENTIFIER, EQUAL, self.expression, SEMICOLON)
 
-    @rule
+    @rule("ReturnStatement")
     def return_statement(self) -> Rule:
         return seq(RETURN, self.expression, SEMICOLON) | seq(RETURN, SEMICOLON)
 
-    @rule
+    @rule("ForStatement")
     def for_statement(self) -> Rule:
         return seq(FOR, self.iterator_variable, IN, self.expression, self.block)
 
-    @rule
+    @rule("IteratorVariable")
     def iterator_variable(self) -> Rule:
         return IDENTIFIER
 
-    @rule
+    @rule("IfStatement")
     def if_statement(self) -> Rule:
         return self.conditional_expression
 
@@ -293,12 +293,12 @@ class FineGrammar(Grammar):
             | self.object_constructor_expression
             | self.match_expression
             | seq(self.primary_expression, LPAREN, RPAREN)
-            | seq(self.primary_expression, LPAREN, self.expression_list, RPAREN)
+            | seq(self.primary_expression, LPAREN, self._expression_list, RPAREN)
             | seq(self.primary_expression, DOT, IDENTIFIER)
             | seq(LPAREN, self.expression, RPAREN)
         )
 
-    @rule
+    @rule("ConditionalExpression")
     def conditional_expression(self) -> Rule:
         return (
             seq(IF, self.expression, self.block)
@@ -308,54 +308,54 @@ class FineGrammar(Grammar):
 
     @rule
     def list_constructor_expression(self) -> Rule:
-        return seq(LSQUARE, RSQUARE) | seq(LSQUARE, self.expression_list, RSQUARE)
+        return seq(LSQUARE, RSQUARE) | seq(LSQUARE, self._expression_list, RSQUARE)
 
     @rule
-    def expression_list(self) -> Rule:
+    def _expression_list(self) -> Rule:
         return (
             self.expression
             | seq(self.expression, COMMA)
-            | seq(self.expression, COMMA, self.expression_list)
+            | seq(self.expression, COMMA, self._expression_list)
         )
 
     @rule
     def match_expression(self) -> Rule:
         return seq(MATCH, self.expression, self.match_body)
 
-    @rule
+    @rule("MatchBody")
     def match_body(self) -> Rule:
-        return seq(LCURLY, RCURLY) | seq(LCURLY, self.match_arms, RCURLY)
+        return seq(LCURLY, RCURLY) | seq(LCURLY, self._match_arms, RCURLY)
 
     @rule
-    def match_arms(self) -> Rule:
+    def _match_arms(self) -> Rule:
         return (
             self.match_arm
             | seq(self.match_arm, COMMA)
-            | seq(self.match_arm, COMMA, self.match_arms)
+            | seq(self.match_arm, COMMA, self._match_arms)
         )
 
-    @rule
+    @rule("MatchArm")
     def match_arm(self) -> Rule:
         return seq(self.pattern, ARROW, self.expression)
 
-    @rule
+    @rule("Pattern")
     def pattern(self) -> Rule:
         return (
-            seq(self.variable_binding, self.pattern_core, AND, self.and_expression)
-            | seq(self.variable_binding, self.pattern_core)
-            | seq(self.pattern_core, AND, self.and_expression)
-            | self.pattern_core
+            seq(self.variable_binding, self._pattern_core, AND, self.and_expression)
+            | seq(self.variable_binding, self._pattern_core)
+            | seq(self._pattern_core, AND, self.and_expression)
+            | self._pattern_core
         )
 
     @rule
-    def pattern_core(self) -> Rule:
+    def _pattern_core(self) -> Rule:
         return self.type_expression | self.wildcard_pattern
 
-    @rule
+    @rule("WildcardPattern")
     def wildcard_pattern(self) -> Rule:
         return UNDERSCORE
 
-    @rule
+    @rule("VariableBinding")
     def variable_binding(self) -> Rule:
         return seq(IDENTIFIER, COLON)
 
