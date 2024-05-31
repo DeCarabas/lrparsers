@@ -420,6 +420,43 @@ class Error(Action):
     pass
 
 
+@dataclasses.dataclass
+class PossibleAction:
+    name: str
+    rule: str
+    action_str: str
+
+    def __str__(self):
+        return f"We are in the rule `{self.name}: {self.rule}` and we should {self.action_str}"
+
+
+@dataclasses.dataclass
+class Ambiguity:
+    path: str
+    symbol: str
+    actions: typing.Tuple[PossibleAction]
+
+    def __str__(self):
+        lines = []
+        lines.append(
+            f"When we have parsed '{self.path}' and see '{self.symbol}' we don't know whether:"
+        )
+        lines.extend(f"- {action}" for action in self.actions)
+        return "\n".join(lines)
+
+
+class AmbiguityError(Exception):
+    ambiguities: list[Ambiguity]
+
+    def __init__(self, ambiguities):
+        self.ambiguities = ambiguities
+
+    def __str__(self):
+        return "The grammar is ambiguous:\n\n" + "\n\n".join(
+            str(ambiguity) for ambiguity in self.ambiguities
+        )
+
+
 class ErrorCollection:
     """A collection of errors. The errors are grouped by config set and alphabet
     symbol, so that we can group the error strings appropriately when we format
@@ -463,11 +500,11 @@ class ErrorCollection:
 
         symbol_errors[config] = action
 
-    def format(
+    def gen_exception(
         self,
         alphabet: list[str],
         all_sets: ConfigurationSetInfo,
-    ) -> str | None:
+    ) -> AmbiguityError | None:
         """Format all the errors into a string, or return None if there are no
         errors.
 
@@ -475,7 +512,7 @@ class ErrorCollection:
         readable, and all the sets to trace a path to where the errors were
         encountered.
         """
-        if len(self.errors) is None:
+        if len(self.errors) == 0:
             return None
 
         errors = []
@@ -484,10 +521,7 @@ class ErrorCollection:
             path_str = " ".join(alphabet[s] for s in path)
 
             for symbol, symbol_errors in set_errors.items():
-                lines = []
-                lines.append(
-                    f"When we have parsed '{path_str}' and see '{alphabet[symbol]}' we don't know whether:"
-                )
+                actions = []
                 for config, action in symbol_errors.items():
                     name = alphabet[config.name]
                     rule = " ".join(
@@ -499,7 +533,7 @@ class ErrorCollection:
 
                     match action:
                         case Reduce(name=name, count=count, transparent=transparent):
-                            name_str = name if not transparent else "transparent node"
+                            name_str = name if not transparent else f"transparent node ({name})"
                             action_str = f"pop {count} values off the stack and make a {name_str}"
                         case Shift():
                             action_str = "consume the token and keep going"
@@ -508,13 +542,13 @@ class ErrorCollection:
                         case _:
                             raise Exception(f"unknown action type {action}")
 
-                    lines.append(
-                        f"  - We are in the rule `{name}: {rule}` and we should {action_str}"
-                    )
+                    actions.append(PossibleAction(name, rule, action_str))
 
-                errors.append("\n".join(lines))
+                errors.append(
+                    Ambiguity(path=path_str, symbol=alphabet[symbol], actions=tuple(actions))
+                )
 
-        return "\n\n".join(errors)
+        return AmbiguityError(errors)
 
 
 @dataclasses.dataclass
@@ -607,9 +641,10 @@ class TableBuilder(object):
         Raises ValueError if there were any conflicts during construction.
         """
         self._flush_row()
-        if self.errors.any():
-            errors = self.errors.format(self.alphabet, all_sets)
-            raise ValueError(f"Errors building the table:\n\n{errors}")
+        error = self.errors.gen_exception(self.alphabet, all_sets)
+        if error is not None:
+            raise error
+
         return ParseTable(actions=self.actions, gotos=self.gotos)
 
     def new_row(self, config_set: ConfigSet):
