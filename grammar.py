@@ -76,11 +76,6 @@ class FineGrammar(Grammar):
                 # statement or an expression, prefer the statement.
                 #
                 (Assoc.NONE, [self.if_statement]),
-                #
-                # If there's confusion about whether to make an IS expression
-                # or something else, prefer IS.
-                #
-                (Assoc.NONE, [self.is_expression]),
             ],
         )
 
@@ -239,7 +234,6 @@ class FineGrammar(Grammar):
         return (
             seq(self.expression, EQUAL, self.expression)
             | seq(self.expression, OR, self.expression)
-            | seq(self.expression, IS, self.pattern)
             | seq(self.expression, AND, self.expression)
             | seq(self.expression, EQUALEQUAL, self.expression)
             | seq(self.expression, BANGEQUAL, self.expression)
