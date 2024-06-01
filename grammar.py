@@ -1,7 +1,7 @@
 # This is an example grammar.
 import re
 
-from parser import Assoc, Grammar, Nothing, Terminal, rule, seq, Rule
+from parser import Assoc, GenerateLALR, GenerateLR1, Grammar, Nothing, Terminal, rule, seq, Rule
 
 ARROW = Terminal("Arrow")
 AS = Terminal("As")
@@ -81,6 +81,7 @@ class FineGrammar(Grammar):
                 #
                 (Assoc.NONE, [self.is_expression]),
             ],
+            generator=GenerateLALR,
         )
 
     @rule("File")

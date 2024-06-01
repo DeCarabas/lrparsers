@@ -258,11 +258,10 @@ class DynamicModule:
 
 
 class DynamicGrammarModule(DynamicModule):
-    def __init__(self, file_name, member_name, start_rule, generator):
+    def __init__(self, file_name, member_name, start_rule):
         super().__init__(file_name, member_name)
 
         self.start_rule = start_rule
-        self.generator = generator
 
     def _predicate(self, member) -> bool:
         if not super()._predicate(member):
@@ -274,7 +273,7 @@ class DynamicGrammarModule(DynamicModule):
         return False
 
     def _transform(self, value):
-        return value().build_table(start=self.start_rule, generator=self.generator)
+        return value().build_table(start=self.start_rule)
 
 
 class DynamicLexerModule(DynamicModule):
@@ -319,7 +318,7 @@ class Harness:
         self.max_entries = 0
 
         self.grammar_module = DynamicGrammarModule(
-            self.grammar_file, self.grammar_member, self.start_rule, generator=parser.GenerateLALR
+            self.grammar_file, self.grammar_member, self.start_rule
         )
 
         self.lexer_module = DynamicLexerModule(self.lexer_file, self.lexer_member)

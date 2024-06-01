@@ -1850,8 +1850,14 @@ class Grammar:
 
     _precedence: dict[str, typing.Tuple[Assoc, int]]
     _start: str
+    _generator: type[GenerateLR0]
 
-    def __init__(self, start: str, precedence: PrecedenceList | None = None):
+    def __init__(
+        self,
+        start: str,
+        precedence: PrecedenceList | None = None,
+        generator: type[GenerateLR0] = GenerateLALR,
+    ):
         if precedence is None:
             precedence = getattr(self, "precedence", [])
         assert precedence is not None
@@ -1870,6 +1876,7 @@ class Grammar:
 
         self._precedence = precedence_table
         self._start = start
+        self._generator = generator
 
     def generate_nonterminal_dict(
         self, start: str | None = None
@@ -1940,7 +1947,7 @@ class Grammar:
 
         return grammar, transparents
 
-    def build_table(self, start: str | None, generator=GenerateLALR):
+    def build_table(self, start: str | None, generator=None):
         """Construct a parse table for this grammar, starting at the named
         nonterminal rule.
         """
@@ -1948,6 +1955,8 @@ class Grammar:
             start = self._start
         desugared, transparents = self.desugar(start)
 
+        if generator is None:
+            generator = self._generator
         gen = generator(start, desugared, precedence=self._precedence, transparents=transparents)
         table = gen.gen_table()
         return table
