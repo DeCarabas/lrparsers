@@ -1854,13 +1854,25 @@ class Grammar:
 
     def __init__(
         self,
-        start: str,
+        start: str | None = None,
         precedence: PrecedenceList | None = None,
-        generator: type[GenerateLR0] = GenerateLALR,
+        generator: type[GenerateLR0] | None = None,
     ):
+        if start is None:
+            start = getattr(self, "start", None)
+        if start is None:
+            raise ValueError(
+                "The default start rule must either be specified in the constructor or as an "
+                "attribute in the class."
+            )
+
         if precedence is None:
             precedence = getattr(self, "precedence", [])
         assert precedence is not None
+
+        if generator is None:
+            generator = getattr(self, "generator", GenerateLALR)
+        assert generator is not None
 
         precedence_table = {}
         for prec, (associativity, symbols) in enumerate(precedence):

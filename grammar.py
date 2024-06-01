@@ -54,10 +54,11 @@ RSQUARE = Terminal("RightBracket")
 
 
 class FineGrammar(Grammar):
+    generator = GenerateLALR
+    start = "File"
 
     def __init__(self):
         super().__init__(
-            start="File",
             precedence=[
                 (Assoc.RIGHT, [EQUAL]),
                 (Assoc.LEFT, [OR]),
@@ -81,7 +82,6 @@ class FineGrammar(Grammar):
                 #
                 (Assoc.NONE, [self.is_expression]),
             ],
-            generator=GenerateLALR,
         )
 
     @rule("File")
