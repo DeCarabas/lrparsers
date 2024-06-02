@@ -135,6 +135,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import json
 import sys
 import typing
 
@@ -282,7 +283,11 @@ class Configuration:
         )
 
     def format(self, alphabet: list[str]) -> str:
-        la = ", " + str(tuple(alphabet[i] for i in self.lookahead)) if self.lookahead != () else ""
+        if self.lookahead != ():
+            la = " {" + ",".join(alphabet[i] for i in self.lookahead) + "}"
+        else:
+            la = ""
+
         return "{name} -> {bits}{lookahead}".format(
             name=alphabet[self.name],
             bits=" ".join(
@@ -297,7 +302,7 @@ class Configuration:
 
 
 # ConfigSet = typing.Tuple[Configuration, ...]
-class ConfigSet(frozenset):
+class ConfigSet(frozenset[Configuration]):
     pass
 
 
@@ -354,6 +359,21 @@ class ConfigurationSetInfo:
         """
         self.successors[c_id][symbol] = successor
 
+    def dump_state(self, alphabet: list[str]) -> str:
+        return json.dumps(
+            {
+                str(set_index): {
+                    "configs": [c.format(alphabet) for c in config_set],
+                    "successors": {
+                        alphabet[k]: str(v) for k, v in self.successors[set_index].items()
+                    },
+                }
+                for set_index, config_set in enumerate(self.sets)
+            },
+            indent=4,
+            sort_keys=True,
+        )
+
     def find_path_to_set(self, target_set: ConfigSet) -> list[int]:
         """Trace the path of grammar symbols from the first set (which always
         set 0) to the target set. This is useful in conflict reporting,
@@ -369,6 +389,8 @@ class ConfigurationSetInfo:
         visited = set()
 
         queue: collections.deque = collections.deque()
+        # NOTE: Set 0 is always the first set, the one that contains the
+        #       start symbol.
         queue.appendleft((0, []))
         while len(queue) > 0:
             set_index, path = queue.pop()
@@ -452,7 +474,7 @@ class AmbiguityError(Exception):
         self.ambiguities = ambiguities
 
     def __str__(self):
-        return "The grammar is ambiguous:\n\n" + "\n\n".join(
+        return f"{len(self.ambiguities)} ambiguities:\n\n" + "\n\n".join(
             str(ambiguity) for ambiguity in self.ambiguities
         )
 
@@ -505,7 +527,7 @@ class ErrorCollection:
         alphabet: list[str],
         all_sets: ConfigurationSetInfo,
     ) -> AmbiguityError | None:
-        """Format all the errors into a string, or return None if there are no
+        """Format all the errors into an error, or return None if there are no
         errors.
 
         We need the alphabet to turn all these integers into something human
@@ -514,6 +536,9 @@ class ErrorCollection:
         """
         if len(self.errors) == 0:
             return None
+
+        # with open("ambiguity.json", mode="w", encoding="utf-8") as aj:
+        #     aj.write(all_sets.dump_state(alphabet))
 
         errors = []
         for config_set, set_errors in self.errors.items():
@@ -1518,7 +1543,7 @@ class GenerateLR1(GenerateSLR1):
                 lookahead_tuple = tuple(sorted(lookahead))
                 next.append(Configuration.from_rule(config_next, rule, lookahead=lookahead_tuple))
 
-            return tuple(sorted(next))
+            return tuple(next)
 
     def gen_all_sets(self):
         """Generate all of the configuration sets for the grammar.
@@ -1951,6 +1976,10 @@ class Grammar:
                 new_clause = []
                 for symbol in clause:
                     if isinstance(symbol, Terminal):
+                        if symbol.value in temp_grammar:
+                            raise ValueError(
+                                f"'{symbol.value}' is the name of both a Terminal and a NonTerminal rule. This will cause problems."
+                            )
                         new_clause.append(symbol.value)
                     else:
                         new_clause.append(symbol)
@@ -1959,7 +1988,7 @@ class Grammar:
 
         return grammar, transparents
 
-    def build_table(self, start: str | None, generator=None):
+    def build_table(self, start: str | None = None, generator=None):
         """Construct a parse table for this grammar, starting at the named
         nonterminal rule.
         """
