@@ -1,7 +1,8 @@
 # This is an example grammar.
 import re
 
-from parser import Assoc, GenerateLALR, GenerateLR1, Grammar, Nothing, Terminal, rule, seq, Rule
+import parser
+from parser import Assoc, Grammar, Nothing, Terminal, rule, seq, Rule
 
 ARROW = Terminal("Arrow")
 AS = Terminal("As")
@@ -54,7 +55,7 @@ RSQUARE = Terminal("RightBracket")
 
 
 class FineGrammar(Grammar):
-    generator = GenerateLALR
+    # generator = parser.GenerateLR1
     start = "File"
 
     def __init__(self):
@@ -254,7 +255,7 @@ class FineGrammar(Grammar):
     @rule
     def primary_expression(self) -> Rule:
         return (
-            IDENTIFIER
+            self.identifier_expression
             | SELF
             | NUMBER
             | STRING
@@ -272,6 +273,10 @@ class FineGrammar(Grammar):
             | seq(self.primary_expression, DOT, IDENTIFIER)
             | seq(LPAREN, self.expression, RPAREN)
         )
+
+    @rule("IdentifierExpression")
+    def identifier_expression(self):
+        return IDENTIFIER
 
     @rule("ConditionalExpression")
     def conditional_expression(self) -> Rule:
@@ -318,7 +323,6 @@ class FineGrammar(Grammar):
         return (
             seq(self.variable_binding, self._pattern_core, self.pattern_predicate)
             | seq(self.variable_binding, self._pattern_core)
-            | seq(self._pattern_core, self.pattern_predicate)
             | self._pattern_core
         )
 
@@ -534,3 +538,7 @@ class FineTokens:
             column_index = start - col_start
             value = self.src[start : start + length]
             print(f"{start:04} {kind.value:12} {value} ({line_index}, {column_index})")
+
+
+if __name__ == "__main__":
+    FineGrammar().build_table()
