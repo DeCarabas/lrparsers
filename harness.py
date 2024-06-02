@@ -390,7 +390,7 @@ class Harness:
             for line in lines[: rows - 3]:
                 print(line[:cols] + "\r")
         else:
-            wrapper = textwrap.TextWrapper(width=cols)
+            wrapper = textwrap.TextWrapper(width=cols, drop_whitespace=False)
             lines = [line for error in self.errors for line in wrapper.wrap(error)]
             for line in lines[: rows - 3]:
                 print(line + "\r")
