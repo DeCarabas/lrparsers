@@ -145,7 +145,71 @@ import typing
 #
 # We start with LR0 parsers, because they form the basis of everything else.
 ###############################################################################
-class Configuration:
+class ConfigurationCore(typing.NamedTuple):
+    name: int
+    symbols: typing.Tuple[int, ...]
+    position: int
+    next: int | None
+
+    @classmethod
+    def from_rule(cls, name: int, symbols: typing.Tuple[int, ...]):
+        if len(symbols) == 0:
+            next = None
+        else:
+            next = symbols[0]
+        return ConfigurationCore(
+            name=name,
+            symbols=symbols,
+            position=0,
+            next=next,
+        )
+
+    @property
+    def at_end(self) -> bool:
+        return self.position == len(self.symbols)
+
+    def replace_position(self, new_position):
+        if new_position == len(self.symbols):
+            next = None
+        else:
+            next = self.symbols[new_position]
+        return ConfigurationCore(
+            name=self.name,
+            symbols=self.symbols,
+            position=new_position,
+            next=next,
+        )
+
+    @property
+    def rest(self) -> typing.Tuple[int, ...]:
+        return self.symbols[(self.position + 1) :]
+
+    def __repr__(self) -> str:
+        return "{name} -> {bits}".format(
+            name=self.name,
+            bits=" ".join(
+                [
+                    ("* " + str(sym)) if i == self.position else str(sym)
+                    for i, sym in enumerate(self.symbols)
+                ]
+            )
+            + (" *" if self.at_end else ""),
+        )
+
+    def format(self, alphabet: list[str]) -> str:
+        return "{name} -> {bits}".format(
+            name=alphabet[self.name],
+            bits=" ".join(
+                [
+                    "* " + alphabet[sym] if i == self.position else alphabet[sym]
+                    for i, sym in enumerate(self.symbols)
+                ]
+            )
+            + (" *" if self.at_end else ""),
+        )
+
+
+class Configuration(typing.NamedTuple):
     """A rule being tracked in a state. That is, a specific position within a
     specific rule, with an associated lookahead state.
 
@@ -162,125 +226,34 @@ class Configuration:
     the part about LR(1).)
     """
 
-    __slots__ = (
-        "name",
-        "symbols",
-        "position",
-        "lookahead",
-        "next",
-        "at_end",
-        "_vals",
-        "_hash",
-    )
-
-    name: int
-    symbols: typing.Tuple[int, ...]
-    position: int
+    core: ConfigurationCore
     lookahead: typing.Tuple[int, ...]
-    next: int | None
-    at_end: bool
-
-    _vals: typing.Tuple
-    _hash: int
-
-    def __init__(self, name, symbols, position, lookahead) -> None:
-        self.name = name
-        self.symbols = symbols
-        self.position = position
-        self.lookahead = lookahead
-
-        at_end = position == len(symbols)
-        self.at_end = at_end
-        self.next = symbols[position] if not at_end else None
-
-        self._vals = (name, symbols, position, lookahead)
-        self._hash = hash(self._vals)
 
     @classmethod
     def from_rule(cls, name: int, symbols: typing.Tuple[int, ...], lookahead=()):
+        # Consider adding at_end and next to the namedtuple.
         return Configuration(
-            name=name,
-            symbols=symbols,
-            position=0,
-            lookahead=lookahead,
-        )
-
-    def __hash__(self) -> int:
-        return self._hash
-
-    def __eq__(self, value: typing.Any, /) -> bool:
-        if value is self:
-            return True
-
-        return (
-            value._hash == self._hash
-            and value.name == self.name
-            and value.position == self.position
-            and value.symbols == self.symbols
-            and value.lookahead == self.lookahead
-        )
-
-    def __lt__(self, value) -> bool:
-        if not isinstance(value, Configuration):
-            return NotImplemented
-        return self._vals < value._vals
-
-    def __gt__(self, value) -> bool:
-        if not isinstance(value, Configuration):
-            return NotImplemented
-        return self._vals > value._vals
-
-    def __le__(self, value) -> bool:
-        if not isinstance(value, Configuration):
-            return NotImplemented
-        return self._vals <= value._vals
-
-    def __ge__(self, value) -> bool:
-        if not isinstance(value, Configuration):
-            return NotImplemented
-        return self._vals >= value._vals
-
-    def replace_position(self, new_position):
-        return Configuration(
-            name=self.name,
-            symbols=self.symbols,
-            position=new_position,
-            lookahead=self.lookahead,
-        )
-
-    def clear_lookahead(self):
-        return Configuration(
-            name=self.name,
-            symbols=self.symbols,
-            position=self.position,
-            lookahead=(),
-        )
-
-    def replace_lookahead(self, lookahead: typing.Tuple[int, ...]):
-        return Configuration(
-            name=self.name,
-            symbols=self.symbols,
-            position=self.position,
+            core=ConfigurationCore.from_rule(name, symbols),
             lookahead=lookahead,
         )
 
     @property
+    def at_end(self) -> bool:
+        return self.core.next is None
+
+    def replace_position(self, new_position):
+        return Configuration(
+            core=self.core.replace_position(new_position),
+            lookahead=self.lookahead,
+        )
+
+    @property
     def rest(self):
-        return self.symbols[(self.position + 1) :]
+        return self.core.symbols[(self.core.position + 1) :]
 
     def __repr__(self) -> str:
         la = ", " + str(self.lookahead) if self.lookahead != () else ""
-        return "{name} -> {bits}{lookahead}".format(
-            name=self.name,
-            bits=" ".join(
-                [
-                    ("* " + str(sym)) if i == self.position else str(sym)
-                    for i, sym in enumerate(self.symbols)
-                ]
-            )
-            + (" *" if self.at_end else ""),
-            lookahead=la,
-        )
+        return f"{repr(self.core)}{la}"
 
     def format(self, alphabet: list[str]) -> str:
         if self.lookahead != ():
@@ -288,20 +261,13 @@ class Configuration:
         else:
             la = ""
 
-        return "{name} -> {bits}{lookahead}".format(
-            name=alphabet[self.name],
-            bits=" ".join(
-                [
-                    "* " + alphabet[sym] if i == self.position else alphabet[sym]
-                    for i, sym in enumerate(self.symbols)
-                ]
-            )
-            + (" *" if self.at_end else ""),
-            lookahead=la,
-        )
+        return f"{self.core.format(alphabet)}{la}"
 
 
-# ConfigSet = typing.Tuple[Configuration, ...]
+class CoreSet(frozenset[ConfigurationCore]):
+    pass
+
+
 class ConfigSet(frozenset[Configuration]):
     pass
 
@@ -548,12 +514,13 @@ class ErrorCollection:
             for symbol, symbol_errors in set_errors.items():
                 actions = []
                 for config, action in symbol_errors.items():
-                    name = alphabet[config.name]
+                    core = config.core
+                    name = alphabet[core.name]
                     rule = " ".join(
-                        f"{'* ' if config.position == i else ''}{alphabet[s]}"
-                        for i, s in enumerate(config.symbols)
+                        f"{'* ' if core.position == i else ''}{alphabet[s]}"
+                        for i, s in enumerate(core.symbols)
                     )
-                    if config.next is None:
+                    if config.at_end:
                         rule += " *"
 
                     match action:
@@ -700,9 +667,9 @@ class TableBuilder(object):
         """Mark a reduce of the given configuration for the given symbol in the
         current row.
         """
-        name = self.alphabet[config.name]
+        name = self.alphabet[config.core.name]
         transparent = name in self.transparents
-        action = Reduce(name, len(config.symbols), transparent)
+        action = Reduce(name, len(config.core.symbols), transparent)
         self._set_table_action(symbol, action, config)
 
     def set_table_accept(self, symbol: int, config: Configuration):
@@ -728,7 +695,7 @@ class TableBuilder(object):
         if isinstance(action, Shift):
             return self.precedence[symbol]
         else:
-            return self.precedence[config.name]
+            return self.precedence[config.core.name]
 
     def _set_table_action(self, symbol_id: int, action: Action, config: Configuration | None):
         """Set the action for 'symbol' in the table row to 'action'.
@@ -960,7 +927,7 @@ class GenerateLR0:
         beginning. (If the position for config is just before a terminal,
         or at the end of the production, then the next set is empty.)
         """
-        next = config.next
+        next = config.core.next
         if next is None:
             return ()
         else:
@@ -984,15 +951,14 @@ class GenerateLR0:
                     continue
 
                 closure.add(config)
-                for next_config in self.gen_closure_next(config):
-                    pending_next.append(next_config)
+                pending_next.extend(self.gen_closure_next(config))
 
             temp = pending
             pending = pending_next
             pending_next = temp
             pending_next.clear()
 
-        return ConfigSet(closure)  # TODO: Why tuple?
+        return ConfigSet(closure)
 
     def gen_successor(self, config_set: typing.Iterable[Configuration], symbol: int) -> ConfigSet:
         """Compute the successor state for the given config set and the
@@ -1002,9 +968,9 @@ class GenerateLR0:
         the symbol.
         """
         seeds = tuple(
-            config.replace_position(config.position + 1)
+            config.replace_position(config.core.position + 1)
             for config in config_set
-            if config.next == symbol
+            if config.core.next == symbol
         )
 
         closure = self.gen_closure(seeds)
@@ -1019,7 +985,7 @@ class GenerateLR0:
         could possibly see, and figure out which configs sets we get from
         those symbols. Those are the successors of this set.)
         """
-        possible = {config.next for config in config_set if config.next is not None}
+        possible = {config.core.next for config in config_set if config.core.next is not None}
 
         next = []
         for symbol in possible:
@@ -1108,9 +1074,9 @@ class GenerateLR0:
             successors = config_sets.successors[config_set_id]
 
             for config in config_set:
-                config_next = config.next
+                config_next = config.core.next
                 if config_next is None:
-                    if config.name != self.start_symbol:
+                    if config.core.name != self.start_symbol:
                         for a in self.gen_reduce_set(config):
                             builder.set_table_reduce(a, config)
                     else:
@@ -1472,7 +1438,7 @@ class GenerateSLR1(GenerateLR0):
 
         In an SLR1 parser, this is the follow set of the config nonterminal.
         """
-        return self.gen_follow(config.name)
+        return self.gen_follow(config.core.name)
 
 
 class GenerateLR1(GenerateSLR1):
@@ -1531,7 +1497,7 @@ class GenerateLR1(GenerateSLR1):
         (See the documentation in GenerateLR0 for more information on how
         this function fits into the whole process, specifically `gen_closure`.)
         """
-        config_next = config.next
+        config_next = config.core.next
         if config_next is None:
             return ()
         else:
@@ -1590,9 +1556,9 @@ class GenerateLALR(GenerateLR1):
         # First, do the actual walk. Don't merge yet: just keep track of all
         # the config sets that need to be merged.
         #
-        F: dict[ConfigSet, list[ConfigSet]] = {}
+        F: dict[CoreSet, list[ConfigSet]] = {}
         seen: set[ConfigSet] = set()
-        successors: list[typing.Tuple[ConfigSet, int, ConfigSet]] = []
+        successors: list[typing.Tuple[CoreSet, int, CoreSet]] = []
         pending = [config_set]
         while len(pending) > 0:
             config_set = pending.pop()
@@ -1600,7 +1566,7 @@ class GenerateLALR(GenerateLR1):
                 continue
             seen.add(config_set)
 
-            config_set_no_la = ConfigSet(s.clear_lookahead() for s in config_set)
+            config_set_no_la = CoreSet(s.core for s in config_set)
 
             existing = F.get(config_set_no_la)
             if existing is not None:
@@ -1609,17 +1575,17 @@ class GenerateLALR(GenerateLR1):
                 F[config_set_no_la] = [config_set]
 
             for symbol, successor in self.gen_all_successors(config_set):
-                successor_no_la = ConfigSet(s.clear_lookahead() for s in successor)
+                successor_no_la = CoreSet(s.core for s in successor)
                 successors.append((config_set_no_la, symbol, successor_no_la))
                 pending.append(successor)
 
         # Now we gathered the sets, merge them all.
-        final_sets: dict[ConfigSet, ConfigSet] = {}
+        final_sets: dict[CoreSet, ConfigSet] = {}
         for key, config_sets in F.items():
-            la_merge: dict[Configuration, set[int]] = {}
+            la_merge: dict[ConfigurationCore, set[int]] = {}
             for config_set in config_sets:
                 for config in config_set:
-                    la_key = config.clear_lookahead()
+                    la_key = config.core
                     la_set = la_merge.get(la_key)
                     if la_set is None:
                         la_merge[la_key] = set(config.lookahead)
@@ -1627,7 +1593,8 @@ class GenerateLALR(GenerateLR1):
                         la_set.update(config.lookahead)
 
             final_set = ConfigSet(
-                config.replace_lookahead(tuple(sorted(la))) for config, la in la_merge.items()
+                Configuration(core=core, lookahead=tuple(sorted(la)))
+                for core, la in la_merge.items()
             )
             final_sets[key] = final_set
 
