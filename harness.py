@@ -26,12 +26,12 @@ import parser
 ###############################################################################
 
 
-def trace_state(id, stack, input, input_index, action):
+def trace_state(id, stack, token, action):
     print(
         "{id: <04}: {stack: <20}  {input: <50}  {action: <5}".format(
             id=id,
             stack=repr([s[0] for s in stack]),
-            input=repr(input[input_index : input_index + 4]),
+            input=token.kind,
             action=repr(action),
         )
     )
@@ -74,27 +74,25 @@ class ParserThread:
     # Our stack is a stack of tuples, where the first entry is the state
     # number and the second entry is the 'value' that was generated when the
     # state was pushed.
+    table: parser.ParseTable
     stack: list[typing.Tuple[int, TokenValue | Tree | None]]
 
-    def __init__(self, id, trace, stack):
+    def __init__(self, id, trace, table, stack):
         self.id = id
         self.trace = trace
+        self.table = table
         self.stack = stack
 
-    def step(
-        self,
-        table: parser.ParseTable,
-        current_token: str,
-        input_index: int,
-        input_tokens: list[typing.Tuple],
-    ) -> StepResult:
+    def step(self, current_token: TokenValue) -> StepResult:
         stack = self.stack
+        table = self.table
+
         while True:
             current_state = stack[-1][0]
 
-            action = table.actions[current_state].get(current_token, parser.Error())
+            action = table.actions[current_state].get(current_token.kind, parser.Error())
             if self.trace:
-                self.trace(self.id, stack, input, input_index, action)
+                self.trace(self.id, stack, current_token, action)
 
             match action:
                 case parser.Accept():
@@ -126,9 +124,7 @@ class ParserThread:
                     continue
 
                 case parser.Shift(state):
-                    (kind, start, length) = input_tokens[input_index]
-                    tval = TokenValue(kind=kind.value, start=start, end=start + length)
-                    stack.append((state, tval))
+                    stack.append((state, current_token))
                     return ContinueResult()
 
                 case parser.Error():
@@ -138,25 +134,26 @@ class ParserThread:
                     raise ValueError(f"Unknown action type: {action}")
 
 
-def parser_thread():
-    pass
-
-
 def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | None, list[str]]:
     input_tokens = tokens.tokens()
-    input: list[str] = [t.value for (t, _, _) in input_tokens]
+    input: list[TokenValue] = [
+        TokenValue(kind=kind.value, start=start, end=start + length)
+        for (kind, start, length) in input_tokens
+    ]
 
     assert "$" not in input
-    input = input + ["$"]
+    input = input + [TokenValue(kind="$", start=-1, end=-1)]
     input_index = 0
 
-    threads = [ParserThread(0, trace, [(0, None)])]
+    threads = [
+        ParserThread(0, trace, table, [(0, None)]),
+    ]
 
     while True:
         assert len(threads) > 0
         current_token = input[input_index]
         for thread in threads:
-            sr = thread.step(table, current_token, input_index, input_tokens)
+            sr = thread.step(current_token)
             match sr:
                 case AcceptResult(value):
                     return (value, [])
@@ -169,8 +166,8 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
                         message = "Unexpected end of file"
                         start = input_tokens[-1][1]
                     else:
-                        message = f"Syntax error: unexpected symbol {current_token}"
-                        (_, start, _) = input_tokens[input_index]
+                        message = f"Syntax error: unexpected symbol {current_token.kind}"
+                        start = current_token.start
 
                     line_index = bisect.bisect_left(tokens.lines, start)
                     if line_index == 0:
