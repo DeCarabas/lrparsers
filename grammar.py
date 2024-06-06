@@ -256,11 +256,8 @@ class FineGrammar(Grammar):
     def primary_expression(self) -> Rule:
         return (
             self.identifier_expression
+            | self.literal_expression
             | SELF
-            | NUMBER
-            | STRING
-            | TRUE
-            | FALSE
             | seq(BANG, self.primary_expression)
             | seq(MINUS, self.primary_expression)
             | self.block
@@ -277,6 +274,10 @@ class FineGrammar(Grammar):
     @rule("IdentifierExpression")
     def identifier_expression(self):
         return IDENTIFIER
+
+    @rule("Literal")
+    def literal_expression(self):
+        return NUMBER | STRING | TRUE | FALSE
 
     @rule("ConditionalExpression")
     def conditional_expression(self) -> Rule:

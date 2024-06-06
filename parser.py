@@ -287,8 +287,10 @@ class ConfigurationSetInfo:
     structure, but they all compute this information.)
     """
 
+    core_key: dict[ConfigSet, int]  # Map a ConfigSet into am index
     config_set_key: dict[ConfigSet, int]  # Map a ConfigSet into am index
     sets: list[ConfigSet]  # Map the index back into a set
+    closures: list[ConfigSet | None]  # Track closures
 
     # All the sucessors for all of the sets. `successors[i]` is the mapping
     # from grammar symbol to the index of the set you get by processing that
@@ -296,11 +298,13 @@ class ConfigurationSetInfo:
     successors: list[dict[int, int]]
 
     def __init__(self):
+        self.core_key = {}
         self.config_set_key = {}
         self.sets = []
+        self.closures = []
         self.successors = []
 
-    def register_config_set(self, c: ConfigSet) -> typing.Tuple[int, bool]:
+    def register_core(self, c: ConfigSet) -> typing.Tuple[int, bool]:
         """Potentially add a new config set to the set of sets. Returns the
         canonical ID of the set within this structure, along with a boolean
         indicating whether the set was just added or not.
@@ -308,15 +312,21 @@ class ConfigurationSetInfo:
         (You can use this integer to get the set back, if you need it, and
         also access the successors table.)
         """
-        existing = self.config_set_key.get(c)
+        existing = self.core_key.get(c)
         if existing is not None:
             return existing, False
 
         index = len(self.sets)
         self.sets.append(c)
+        self.closures.append(None)
         self.successors.append({})
-        self.config_set_key[c] = index
+        self.core_key[c] = index
         return index, True
+
+    def register_config_closure(self, c_id: int, closure: ConfigSet):
+        assert self.closures[c_id] is None
+        self.closures[c_id] = closure
+        self.config_set_key[closure] = c_id
 
     def add_successor(self, c_id: int, symbol: int, successor: int):
         """Register sucessor(`c_id`, `symbol`) -> `successor`, where c_id
@@ -960,22 +970,6 @@ class GenerateLR0:
 
         return ConfigSet(closure)
 
-    def gen_successor(self, config_set: typing.Iterable[Configuration], symbol: int) -> ConfigSet:
-        """Compute the successor state for the given config set and the
-        given symbol.
-
-        The successor represents the next state of the parser after seeing
-        the symbol.
-        """
-        seeds = tuple(
-            config.replace_position(config.core.position + 1)
-            for config in config_set
-            if config.core.next == symbol
-        )
-
-        closure = self.gen_closure(seeds)
-        return closure
-
     def gen_all_successors(
         self, config_set: typing.Iterable[Configuration]
     ) -> list[typing.Tuple[int, ConfigSet]]:
@@ -989,23 +983,29 @@ class GenerateLR0:
 
         next = []
         for symbol in possible:
-            successor = self.gen_successor(config_set, symbol)
-            if len(successor) > 0:
-                next.append((symbol, successor))
+            seeds = ConfigSet(
+                config.replace_position(config.core.position + 1)
+                for config in config_set
+                if config.core.next == symbol
+            )
+            if len(seeds) > 0:
+                next.append((symbol, seeds))
 
         return next
 
-    def gen_sets(self, config_set: ConfigSet) -> ConfigurationSetInfo:
-        """Generate all configuration sets starting from the provided set."""
+    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
+        """Generate all configuration sets starting from the provided seeds."""
         result = ConfigurationSetInfo()
 
         successors = []
-        pending = [config_set]
+        pending = [ConfigSet(seeds)]
         pending_next = []
         while len(pending) > 0:
-            for config_set in pending:
-                id, is_new = result.register_config_set(config_set)
+            for core in pending:
+                id, is_new = result.register_core(core)
                 if is_new:
+                    config_set = self.gen_closure(core)
+                    result.register_config_closure(id, config_set)
                     for symbol, successor in self.gen_all_successors(config_set):
                         successors.append((id, symbol, successor))
                         pending_next.append(successor)
@@ -1016,18 +1016,17 @@ class GenerateLR0:
             pending_next.clear()
 
         for id, symbol, successor in successors:
-            result.add_successor(id, symbol, result.config_set_key[successor])
+            result.add_successor(id, symbol, result.core_key[successor])
 
         return result
 
     def gen_all_sets(self) -> ConfigurationSetInfo:
         """Generate all of the configuration sets for the grammar."""
-        seeds = tuple(
+        seeds = [
             Configuration.from_rule(self.start_symbol, rule)
             for rule in self.grammar[self.start_symbol]
-        )
-        initial_set = self.gen_closure(seeds)
-        return self.gen_sets(initial_set)
+        ]
+        return self.gen_sets(seeds)
 
     def gen_reduce_set(self, config: Configuration) -> typing.Iterable[int]:
         """Return the set of symbols that indicate we should reduce the given
@@ -1069,7 +1068,8 @@ class GenerateLR0:
         config_sets = self.gen_all_sets()
         builder = TableBuilder(self.alphabet, self.precedence, self.transparents)
 
-        for config_set_id, config_set in enumerate(config_sets.sets):
+        for config_set_id, config_set in enumerate(config_sets.closures):
+            assert config_set is not None
             builder.new_row(config_set)
             successors = config_sets.successors[config_set_id]
 
@@ -1517,12 +1517,11 @@ class GenerateLR1(GenerateSLR1):
         In LR1 parsers, we must remember to set the lookahead of the start
         symbol to '$'.
         """
-        seeds = tuple(
+        seeds = [
             Configuration.from_rule(self.start_symbol, rule, lookahead=(self.end_symbol,))
             for rule in self.grammar[self.start_symbol]
-        )
-        initial_set = self.gen_closure(seeds)
-        return self.gen_sets(initial_set)
+        ]
+        return self.gen_sets(seeds)
 
 
 class GenerateLALR(GenerateLR1):
@@ -1544,7 +1543,7 @@ class GenerateLALR(GenerateLR1):
     use a bunch of improvement, probably.)
     """
 
-    def gen_sets(self, config_set: ConfigSet) -> ConfigurationSetInfo:
+    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
         """Recursively generate all configuration sets starting from the
         provided set.
 
@@ -1558,26 +1557,30 @@ class GenerateLALR(GenerateLR1):
         #
         F: dict[CoreSet, list[ConfigSet]] = {}
         seen: set[ConfigSet] = set()
+        closed_cores: dict[CoreSet, CoreSet] = {}
         successors: list[typing.Tuple[CoreSet, int, CoreSet]] = []
-        pending = [config_set]
+
+        pending = [(ConfigSet(seeds), CoreSet(s.core for s in seeds))]
         while len(pending) > 0:
-            config_set = pending.pop()
-            if config_set in seen:
+            seed_set, seed_core = pending.pop()
+            if seed_set in seen:
                 continue
-            seen.add(config_set)
+            seen.add(seed_set)
 
-            config_set_no_la = CoreSet(s.core for s in config_set)
+            closure = self.gen_closure(seed_set)
+            closure_core = CoreSet(s.core for s in closure)
+            closed_cores[seed_core] = closure_core
 
-            existing = F.get(config_set_no_la)
+            existing = F.get(closure_core)
             if existing is not None:
-                existing.append(config_set)
+                existing.append(closure)
             else:
-                F[config_set_no_la] = [config_set]
+                F[closure_core] = [closure]
 
-            for symbol, successor in self.gen_all_successors(config_set):
-                successor_no_la = CoreSet(s.core for s in successor)
-                successors.append((config_set_no_la, symbol, successor_no_la))
-                pending.append(successor)
+            for symbol, successor in self.gen_all_successors(closure):
+                successor_seed_core = CoreSet(s.core for s in successor)
+                successors.append((closure_core, symbol, successor_seed_core))
+                pending.append((successor, successor_seed_core))
 
         # Now we gathered the sets, merge them all.
         final_sets: dict[CoreSet, ConfigSet] = {}
@@ -1601,7 +1604,10 @@ class GenerateLALR(GenerateLR1):
         # Register all the actually merged, final config sets.
         result = ConfigurationSetInfo()
         for config_set in final_sets.values():
-            result.register_config_set(config_set)
+            # Because we're building this so late we don't distinguish.
+            # This is probably a hack, and a sign the tracker should be better.
+            id, _ = result.register_core(config_set)
+            result.register_config_closure(id, config_set)
 
         # Now record all the successors that we found. Of course, the actual
         # sets that wound up in the ConfigurationSetInfo don't match anything
@@ -1610,10 +1616,11 @@ class GenerateLALR(GenerateLR1):
         # *Fortunately* we recorded the no-lookahead keys in the successors
         # so we can find the final sets, then look them up in the registered
         # sets, and actually register the successor.
-        for config_set_no_la, symbol, successor_no_la in successors:
-            actual_config_set = final_sets[config_set_no_la]
+        for config_core, symbol, successor_seed_core in successors:
+            actual_config_set = final_sets[config_core]
             from_index = result.config_set_key[actual_config_set]
 
+            successor_no_la = closed_cores[successor_seed_core]
             actual_successor = final_sets[successor_no_la]
             to_index = result.config_set_key[actual_successor]
 
