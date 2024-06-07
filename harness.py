@@ -53,21 +53,24 @@ class Tree:
 
 
 @dataclass
-class AcceptResult:
-    result: Tree
+class ParseError:
+    message: str
+    start: int
+    end: int
+
+
+@dataclass
+class StopResult:
+    result: Tree | None
+    errors: list[ParseError]
 
 
 @dataclass
 class ContinueResult:
-    pass
+    threads: list["ParserThread"]
 
 
-@dataclass
-class ErrorResult:
-    pass
-
-
-StepResult = AcceptResult | ContinueResult | ErrorResult
+StepResult = StopResult | ContinueResult
 
 
 class ParserThread:
@@ -76,12 +79,14 @@ class ParserThread:
     # state was pushed.
     table: parser.ParseTable
     stack: list[typing.Tuple[int, TokenValue | Tree | None]]
+    errors: list[ParseError]
 
     def __init__(self, id, trace, table, stack):
         self.id = id
         self.trace = trace
         self.table = table
         self.stack = stack
+        self.errors = []
 
     def step(self, current_token: TokenValue) -> StepResult:
         stack = self.stack
@@ -98,7 +103,7 @@ class ParserThread:
                 case parser.Accept():
                     result = stack[-1][1]
                     assert isinstance(result, Tree)
-                    return AcceptResult(result)
+                    return StopResult(result, self.errors)
 
                 case parser.Reduce(name=name, count=size, transparent=transparent):
                     children: list[TokenValue | Tree] = []
@@ -125,10 +130,21 @@ class ParserThread:
 
                 case parser.Shift(state):
                     stack.append((state, current_token))
-                    return ContinueResult()
+                    return ContinueResult([self])
 
                 case parser.Error():
-                    return ErrorResult()
+                    if current_token.kind == "$":
+                        message = "Unexpected end of file"
+                    else:
+                        message = f"Syntax error: unexpected symbol {current_token.kind}"
+
+                    self.errors.append(
+                        ParseError(
+                            message=message, start=current_token.start, end=current_token.end
+                        )
+                    )
+                    # TODO: Error Recovery Here
+                    return StopResult(None, self.errors)
 
                 case _:
                     raise ValueError(f"Unknown action type: {action}")
@@ -148,42 +164,46 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
     threads = [
         ParserThread(0, trace, table, [(0, None)]),
     ]
+    results: list[typing.Tuple[ParserThread, Tree | None, list[ParseError]]] = []
 
-    while True:
-        assert len(threads) > 0
+    while len(threads) > 0:
         current_token = input[input_index]
+        next_threads: list[ParserThread] = []
         for thread in threads:
             sr = thread.step(current_token)
             match sr:
-                case AcceptResult(value):
-                    return (value, [])
-
-                case ContinueResult():
+                case StopResult(value, errors):
+                    results.append((thread, value, errors))
                     break
 
-                case ErrorResult():
-                    if input_index >= len(input_tokens):
-                        message = "Unexpected end of file"
-                        start = input_tokens[-1][1]
-                    else:
-                        message = f"Syntax error: unexpected symbol {current_token.kind}"
-                        start = current_token.start
+                case ContinueResult(threads):
+                    next_threads.extend(threads)
+                    break
 
-                    line_index = bisect.bisect_left(tokens.lines, start)
-                    if line_index == 0:
-                        col_start = 0
-                    else:
-                        col_start = tokens.lines[line_index - 1] + 1
-                    column_index = start - col_start
-                    line_index += 1
-
-                    error = f"{line_index}:{column_index}: {message}"
-                    return (None, [error])
                 case _:
                     typing.assert_never(sr)
 
         # All threads have accepted or errored or consumed input.
+        threads = next_threads
         input_index += 1
+
+    # TODO: Score results and whatnot, pick the best one.
+    assert len(results) > 0
+    _, result, errors = results[0]
+
+    error_strings = []
+    for parse_error in errors:
+        line_index = bisect.bisect_left(tokens.lines, parse_error.start)
+        if line_index == 0:
+            col_start = 0
+        else:
+            col_start = tokens.lines[line_index - 1] + 1
+        column_index = parse_error.start - col_start
+        line_index += 1
+
+        error_strings.append(f"{line_index}:{column_index}: {parse_error.message}")
+
+    return (result, error_strings)
 
 
 ###############################################################################
