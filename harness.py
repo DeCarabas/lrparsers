@@ -157,8 +157,8 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
         for (kind, start, length) in input_tokens
     ]
 
-    assert "$" not in input
-    input = input + [TokenValue(kind="$", start=-1, end=-1)]
+    eof = 0 if len(input) == 0 else input[-1].end
+    input = input + [TokenValue(kind="$", start=eof, end=eof)]
     input_index = 0
 
     threads = [
