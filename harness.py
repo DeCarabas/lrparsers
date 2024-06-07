@@ -63,6 +63,7 @@ class ParseError:
 class StopResult:
     result: Tree | None
     errors: list[ParseError]
+    score: int
 
 
 @dataclass
@@ -80,6 +81,7 @@ class ParserThread:
     table: parser.ParseTable
     stack: list[typing.Tuple[int, TokenValue | Tree | None]]
     errors: list[ParseError]
+    score: int
 
     def __init__(self, id, trace, table, stack):
         self.id = id
@@ -87,6 +89,7 @@ class ParserThread:
         self.table = table
         self.stack = stack
         self.errors = []
+        self.score = 0
 
     def step(self, current_token: TokenValue) -> StepResult:
         stack = self.stack
@@ -103,7 +106,7 @@ class ParserThread:
                 case parser.Accept():
                     result = stack[-1][1]
                     assert isinstance(result, Tree)
-                    return StopResult(result, self.errors)
+                    return StopResult(result, self.errors, self.score)
 
                 case parser.Reduce(name=name, count=size, transparent=transparent):
                     children: list[TokenValue | Tree] = []
@@ -134,7 +137,7 @@ class ParserThread:
 
                 case parser.Error():
                     if current_token.kind == "$":
-                        message = "Unexpected end of file"
+                        message = "Syntax error: Unexpected end of file"
                     else:
                         message = f"Syntax error: unexpected symbol {current_token.kind}"
 
@@ -144,7 +147,7 @@ class ParserThread:
                         )
                     )
                     # TODO: Error Recovery Here
-                    return StopResult(None, self.errors)
+                    return StopResult(None, self.errors, self.score)
 
                 case _:
                     raise ValueError(f"Unknown action type: {action}")
@@ -164,7 +167,7 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
     threads = [
         ParserThread(0, trace, table, [(0, None)]),
     ]
-    results: list[typing.Tuple[ParserThread, Tree | None, list[ParseError]]] = []
+    results: list[StopResult] = []
 
     while len(threads) > 0:
         current_token = input[input_index]
@@ -172,11 +175,12 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
         for thread in threads:
             sr = thread.step(current_token)
             match sr:
-                case StopResult(value, errors):
-                    results.append((thread, value, errors))
+                case StopResult():
+                    results.append(sr)
                     break
 
                 case ContinueResult(threads):
+                    assert len(threads) > 0
                     next_threads.extend(threads)
                     break
 
@@ -187,12 +191,12 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
         threads = next_threads
         input_index += 1
 
-    # TODO: Score results and whatnot, pick the best one.
     assert len(results) > 0
-    _, result, errors = results[0]
+    results.sort(key=lambda x: x.score)
+    result = results[0]
 
     error_strings = []
-    for parse_error in errors:
+    for parse_error in result.errors:
         line_index = bisect.bisect_left(tokens.lines, parse_error.start)
         if line_index == 0:
             col_start = 0
@@ -203,7 +207,7 @@ def parse(table: parser.ParseTable, tokens, trace=None) -> typing.Tuple[Tree | N
 
         error_strings.append(f"{line_index}:{column_index}: {parse_error.message}")
 
-    return (result, error_strings)
+    return (result.result, error_strings)
 
 
 ###############################################################################
