@@ -305,7 +305,7 @@ class Parser:
             action = self.table.actions[current_state].get(current_token.kind, parser.Error())
             if al.isEnabledFor(logging.INFO):
                 al.info(
-                    "{stack: <20} {input: <50} {action: <5}".format(
+                    "{stack: <30} {input: <15} {action: <5}".format(
                         stack=repr([s[0] for s in stack[-5:]]),
                         input=current_token.kind,
                         action=repr(action),
@@ -575,6 +575,24 @@ class DisplayMode(enum.Enum):
     LOG = 2
 
 
+class ListHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.logs = []
+
+    def clear(self):
+        self.logs.clear()
+
+    def flush(self):
+        pass
+
+    def emit(self, record):
+        try:
+            self.logs.append(self.format(record))
+        except Exception:
+            self.handleError(record)
+
+
 class Harness:
     grammar_file: str
     grammar_member: str | None
@@ -585,6 +603,7 @@ class Harness:
     table: parser.ParseTable | None
     tree: Tree | None
     mode: DisplayMode
+    log_handler: ListHandler
 
     def __init__(
         self, grammar_file, grammar_member, lexer_file, lexer_member, start_rule, source_path
@@ -608,11 +627,16 @@ class Harness:
         self.average_entries = 0
         self.max_entries = 0
 
+        self.line_start = 0
+
         self.grammar_module = DynamicGrammarModule(
             self.grammar_file, self.grammar_member, self.start_rule
         )
 
         self.lexer_module = DynamicLexerModule(self.lexer_file, self.lexer_member)
+
+        self.log_handler = ListHandler()
+        logging.basicConfig(level=logging.INFO, handlers=[self.log_handler])
 
     def run(self):
         while True:
@@ -627,6 +651,10 @@ class Harness:
                     self.mode = DisplayMode.ERRORS
                 elif k == "l":
                     self.mode = DisplayMode.LOG
+                elif k == "j":
+                    self.line_start = self.line_start - 1
+                elif k == "k":
+                    self.line_start = self.line_start + 1
 
             self.update()
             self.render()
@@ -635,6 +663,7 @@ class Harness:
         return self.grammar_module.get()
 
     def update(self):
+        self.log_handler.clear()
         start_time = time.time()
         try:
             table = self.load_grammar()
@@ -682,11 +711,11 @@ class Harness:
         print(("\u2500" * cols) + "\r")
 
         lines = []
+        wrapper = textwrap.TextWrapper(width=cols, drop_whitespace=False)
 
         match self.mode:
             case DisplayMode.ERRORS:
                 if self.errors is not None:
-                    wrapper = textwrap.TextWrapper(width=cols, drop_whitespace=False)
                     lines.extend(line for error in self.errors for line in wrapper.wrap(error))
 
             case DisplayMode.TREE:
@@ -694,17 +723,23 @@ class Harness:
                     self.format_node(lines, self.tree)
 
             case DisplayMode.LOG:
-                pass
+                lines.extend(line for log in self.log_handler.logs for line in wrapper.wrap(log))
 
             case _:
                 typing.assert_never(self.mode)
 
-        for line in lines[: rows - 4]:
+        if self.line_start < 0:
+            self.line_start = 0
+        if self.line_start > len(lines) - (rows - 4):
+            self.line_start = len(lines) - (rows - 4)
+
+        line_end = self.line_start + (rows - 4)
+        for line in lines[self.line_start : line_end]:
             print(line[:cols] + "\r")
 
         has_errors = "*" if self.errors else " "
         has_tree = "*" if self.tree else " "
-        has_log = " "
+        has_log = " " if self.log_handler.logs else " "
         goto_cursor(0, rows - 1)
         print(("\u2500" * cols) + "\r")
         print(f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (q)uit\r", end="")
