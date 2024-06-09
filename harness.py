@@ -400,8 +400,9 @@ class Parser:
                                 # Insert a token into the stream.
                                 # Need to advance the cursor to compensate.
                                 assert repair.value is not None
+                                pos = input[cursor].end
                                 input.insert(
-                                    cursor, TokenValue(kind=repair.value, start=-1, end=-1)
+                                    cursor, TokenValue(kind=repair.value, start=pos, end=pos)
                                 )
                                 cursor += 1
 
