@@ -738,7 +738,10 @@ class Harness:
 
         # Now that we know how many lines there are we can figure out how
         # many characters we need for the line number...
-        line_number_chars = int(math.log(len(lines), 10)) + 1
+        if len(lines) > 0:
+            line_number_chars = int(math.log(len(lines), 10)) + 1
+        else:
+            line_number_chars = 1
 
         # ...which lets us wrap the lines appropriately.
         wrapper = textwrap.TextWrapper(
