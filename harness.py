@@ -112,19 +112,19 @@ class RepairStack(typing.NamedTuple):
 
             match action:
                 case parser.Shift():
-                    rl.info(f"{stack.state}: SHIFT -> {action.state}")
+                    rl.debug(f"{stack.state}: SHIFT -> {action.state}")
                     return stack.push(action.state), False
 
                 case parser.Accept():
-                    rl.info(f"{stack.state}: ACCEPT")
+                    rl.debug(f"{stack.state}: ACCEPT")
                     return stack, True  # ?
 
                 case parser.Reduce():
-                    rl.info(f"{stack.state}: REDUCE {action.name} {action.count} ")
+                    rl.debug(f"{stack.state}: REDUCE {action.name} {action.count} ")
                     new_stack = stack.pop(action.count)
-                    rl.info(f"               -> {new_stack.state}")
+                    rl.debug(f"               -> {new_stack.state}")
                     new_state = table.gotos[new_stack.state][action.name]
-                    rl.info(f"               goto {new_state}")
+                    rl.debug(f"               goto {new_state}")
                     stack = new_stack.push(new_state)
 
                 case parser.Error():
@@ -159,6 +159,10 @@ class Repair:
         if self.advance >= 3:
             self.success = True
 
+    def __repr__(self):
+        valstr = f"({self.value})" if self.value is not None else ""
+        return f"<Repair {self.repair.value}{valstr} cost:{self.cost} advance:{self.advance}>"
+
     def neighbors(
         self,
         table: parser.ParseTable,
@@ -173,8 +177,8 @@ class Repair:
 
         if rl.isEnabledFor(logging.INFO):
             valstr = f"({self.value})" if self.value is not None else ""
-            rl.info(f"{self.repair.value}{valstr} @ {self.cost} input:{input_index}")
-            rl.info(f"  {','.join(str(s) for s in self.stack.flatten())}")
+            rl.debug(f"{self.repair.value}{valstr} @ {self.cost} input:{input_index}")
+            rl.debug(f"  {','.join(str(s) for s in self.stack.flatten())}")
 
         state = self.stack.state
 
@@ -188,7 +192,7 @@ class Repair:
         # necessary, producing a new version of the stack. Count up the
         # number of successful shifts.
         for token in table.actions[state].keys():
-            rl.info(f"  token: {token}")
+            rl.debug(f"  token: {token}")
             new_stack, success = self.stack.handle_token(table, token)
             if new_stack is None:
                 # Not clear why this is necessary, but I think state merging
@@ -197,7 +201,7 @@ class Repair:
                 continue
 
             if token == input[input_index].kind:
-                rl.info(f"  generate shift {token}")
+                rl.debug(f"  generate shift {token}")
                 yield Repair(
                     repair=RepairAction.Shift,
                     parent=self,
@@ -206,7 +210,7 @@ class Repair:
                     advance=1,  # Move forward by one.
                 )
 
-            rl.info(f"  generate insert {token}")
+            rl.debug(f"  generate insert {token}")
             yield Repair(
                 repair=RepairAction.Insert,
                 value=token,
@@ -223,7 +227,7 @@ class Repair:
         # delete-insert pairs, not insert-delete, because they are
         # symmetrical and therefore a waste of time and memory.)
         if self.repair != RepairAction.Insert:
-            rl.info(f"  generate delete")
+            rl.debug(f"  generate delete")
             yield Repair(
                 repair=RepairAction.Delete,
                 parent=self,
@@ -234,6 +238,7 @@ class Repair:
 
 
 def recover(table: parser.ParseTable, input: list[TokenValue], start: int, stack: ParseStack):
+    rl = recover_log
     initial = Repair(
         repair=RepairAction.Base,
         cost=0,
@@ -259,6 +264,10 @@ def recover(table: parser.ParseTable, input: list[TokenValue], start: int, stack
                     repairs.append(repair)
                     repair = repair.parent
                 repairs.reverse()
+                if rl.isEnabledFor(logging.INFO):
+                    rl.info("Recovered with actions:")
+                    for repair in repairs:
+                        rl.info(" " + repr(repair))
                 return repairs
 
             for neighbor in repair.neighbors(table, input, start):
