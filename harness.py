@@ -5,6 +5,7 @@ import enum
 import importlib
 import inspect
 import logging
+import math
 import os
 import select
 import sys
@@ -711,29 +712,46 @@ class Harness:
         print(("\u2500" * cols) + "\r")
 
         lines = []
-        wrapper = textwrap.TextWrapper(width=cols, drop_whitespace=False)
 
         match self.mode:
             case DisplayMode.ERRORS:
                 if self.errors is not None:
-                    lines.extend(line for error in self.errors for line in wrapper.wrap(error))
+                    lines.extend(line for line in self.errors)
 
             case DisplayMode.TREE:
                 if self.tree is not None:
                     self.format_node(lines, self.tree)
 
             case DisplayMode.LOG:
-                lines.extend(line for log in self.log_handler.logs for line in wrapper.wrap(log))
+                lines.extend(line for line in self.log_handler.logs)
 
             case _:
                 typing.assert_never(self.mode)
+
+        # Now that we know how many lines there are we can figure out how
+        # many characters we need for the line number...
+        line_number_chars = int(math.log(len(lines), 10)) + 1
+
+        # ...which lets us wrap the lines appropriately.
+        wrapper = textwrap.TextWrapper(
+            width=cols - line_number_chars - 1,
+            drop_whitespace=False,
+            subsequent_indent=" " * (line_number_chars + 1),
+        )
+
+        # Wrap and number.
+        lines = [
+            wl
+            for i, line in enumerate(lines)
+            for wl in wrapper.wrap(f"{i: >{line_number_chars}} {line}")
+        ]
 
         if self.line_start < 0:
             self.line_start = 0
         if self.line_start > len(lines) - (rows - 4):
             self.line_start = len(lines) - (rows - 4)
-
         line_end = self.line_start + (rows - 4)
+
         for line in lines[self.line_start : line_end]:
             print(line[:cols] + "\r")
 
