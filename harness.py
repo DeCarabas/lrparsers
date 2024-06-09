@@ -322,21 +322,29 @@ class Parser:
 
                 case parser.Reduce(name=name, count=size, transparent=transparent):
                     children: list[TokenValue | Tree] = []
-                    for _, c in stack[-size:]:
-                        if c is None:
-                            continue
-                        elif isinstance(c, Tree) and c.name is None:
-                            children.extend(c.children)
-                        else:
-                            children.append(c)
+                    if size > 0:
+                        for _, c in stack[-size:]:
+                            if c is None:
+                                continue
+                            elif isinstance(c, Tree) and c.name is None:
+                                children.extend(c.children)
+                            else:
+                                children.append(c)
+                        del stack[-size:]
+
+                        start = children[0].start
+                        end = children[-1].end
+
+                    else:
+                        start = end = current_token.start
 
                     value = Tree(
                         name=name if not transparent else None,
-                        start=children[0].start,
-                        end=children[-1].end,
+                        start=start,
+                        end=end,
                         children=tuple(children),
                     )
-                    del stack[-size:]
+
                     goto = self.table.gotos[stack[-1][0]].get(name)
                     assert goto is not None
                     stack.append((goto, value))
