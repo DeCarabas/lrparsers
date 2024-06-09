@@ -322,13 +322,13 @@ class FineGrammar(Grammar):
     @rule("Pattern")
     def pattern(self) -> Rule:
         return (
-            seq(self.variable_binding, self._pattern_core, self.pattern_predicate)
+            seq(self.variable_binding, self._pattern_core, self._pattern_predicate)
             | seq(self.variable_binding, self._pattern_core)
             | self._pattern_core
         )
 
-    @rule(transparent=True)
-    def pattern_predicate(self) -> Rule:
+    @rule
+    def _pattern_predicate(self) -> Rule:
         return seq(AND, self.expression)
 
     @rule
