@@ -1,9 +1,10 @@
 import argparse
 import bisect
 import enum
+import enum
 import importlib
 import inspect
-import enum
+import logging
 import os
 import select
 import sys
@@ -24,17 +25,6 @@ import parser
 ###############################################################################
 # Parsing Stuff
 ###############################################################################
-
-
-def trace_state(id, stack, token, action):
-    print(
-        "{id: <04}: {stack: <20}  {input: <50}  {action: <5}".format(
-            id=id,
-            stack=repr([s[0] for s in stack]),
-            input=token.kind,
-            action=repr(action),
-        )
-    )
 
 
 @dataclass
@@ -62,17 +52,7 @@ class ParseError:
 ParseStack = list[typing.Tuple[int, TokenValue | Tree | None]]
 
 
-RECOVER_TRACE: list[str] = []
-
-
-def clear_recover_trace():
-    RECOVER_TRACE.clear()
-
-
-def recover_trace(s: str):
-    # RECOVER_TRACE.append(s)
-    del s
-    pass
+recover_log = logging.getLogger("parser.recovery")
 
 
 class RepairAction(enum.Enum):
@@ -121,6 +101,8 @@ class RepairStack(typing.NamedTuple):
     def handle_token(
         self, table: parser.ParseTable, token: str
     ) -> typing.Tuple["RepairStack | None", bool]:
+        rl = recover_log
+
         stack = self
         while True:
             action = table.actions[stack.state].get(token)
@@ -129,19 +111,19 @@ class RepairStack(typing.NamedTuple):
 
             match action:
                 case parser.Shift():
-                    recover_trace(f"      {stack.state}: SHIFT -> {action.state}")
+                    rl.info(f"{stack.state}: SHIFT -> {action.state}")
                     return stack.push(action.state), False
 
                 case parser.Accept():
-                    recover_trace(f"      {stack.state}: ACCEPT")
+                    rl.info(f"{stack.state}: ACCEPT")
                     return stack, True  # ?
 
                 case parser.Reduce():
-                    recover_trace(f"      {stack.state}: REDUCE {action.name} {action.count} ")
+                    rl.info(f"{stack.state}: REDUCE {action.name} {action.count} ")
                     new_stack = stack.pop(action.count)
-                    recover_trace(f"           -> {new_stack.state}")
+                    rl.info(f"               -> {new_stack.state}")
                     new_state = table.gotos[new_stack.state][action.name]
-                    recover_trace(f"               goto {new_state}")
+                    rl.info(f"               goto {new_state}")
                     stack = new_stack.push(new_state)
 
                 case parser.Error():
@@ -182,13 +164,16 @@ class Repair:
         input: list[TokenValue],
         start: int,
     ):
+        rl = recover_log
+
         input_index = start + self.advance
         if input_index >= len(input):
             return
 
-        valstr = f"({self.value})" if self.value is not None else ""
-        recover_trace(f"{self.repair.value}{valstr} @ {self.cost} input:{input_index}")
-        recover_trace(f"  {','.join(str(s) for s in self.stack.flatten())}")
+        if rl.isEnabledFor(logging.INFO):
+            valstr = f"({self.value})" if self.value is not None else ""
+            rl.info(f"{self.repair.value}{valstr} @ {self.cost} input:{input_index}")
+            rl.info(f"  {','.join(str(s) for s in self.stack.flatten())}")
 
         state = self.stack.state
 
@@ -202,7 +187,7 @@ class Repair:
         # necessary, producing a new version of the stack. Count up the
         # number of successful shifts.
         for token in table.actions[state].keys():
-            recover_trace(f"    token: {token}")
+            rl.info(f"  token: {token}")
             new_stack, success = self.stack.handle_token(table, token)
             if new_stack is None:
                 # Not clear why this is necessary, but I think state merging
@@ -211,7 +196,7 @@ class Repair:
                 continue
 
             if token == input[input_index].kind:
-                recover_trace(f"      generate shift {token}")
+                rl.info(f"  generate shift {token}")
                 yield Repair(
                     repair=RepairAction.Shift,
                     parent=self,
@@ -220,7 +205,7 @@ class Repair:
                     advance=1,  # Move forward by one.
                 )
 
-            recover_trace(f"      generate insert {token}")
+            rl.info(f"  generate insert {token}")
             yield Repair(
                 repair=RepairAction.Insert,
                 value=token,
@@ -237,7 +222,7 @@ class Repair:
         # delete-insert pairs, not insert-delete, because they are
         # symmetrical and therefore a waste of time and memory.)
         if self.repair != RepairAction.Insert:
-            recover_trace(f"    generate delete")
+            rl.info(f"  generate delete")
             yield Repair(
                 repair=RepairAction.Delete,
                 parent=self,
@@ -284,6 +269,9 @@ def recover(table: parser.ParseTable, input: list[TokenValue], start: int, stack
         level += 1
 
 
+action_log = logging.getLogger("parser.action")
+
+
 class Parser:
     # Our stack is a stack of tuples, where the first entry is the state
     # number and the second entry is the 'value' that was generated when the
@@ -295,8 +283,6 @@ class Parser:
         self.table = table
 
     def parse(self, tokens) -> typing.Tuple[Tree | None, list[str]]:
-        clear_recover_trace()
-
         input_tokens = tokens.tokens()
         input: list[TokenValue] = [
             TokenValue(kind=kind.value, start=start, end=start + length)
@@ -311,13 +297,20 @@ class Parser:
         result: Tree | None = None
         errors: list[ParseError] = []
 
+        al = action_log
         while True:
             current_token = input[input_index]
             current_state = stack[-1][0]
 
             action = self.table.actions[current_state].get(current_token.kind, parser.Error())
-            if self.trace:
-                self.trace(stack, current_token, action)
+            if al.isEnabledFor(logging.INFO):
+                al.info(
+                    "{stack: <20} {input: <50} {action: <5}".format(
+                        stack=repr([s[0] for s in stack[-5:]]),
+                        input=current_token.kind,
+                        action=repr(action),
+                    )
+                )
 
             match action:
                 case parser.Accept():
@@ -327,8 +320,6 @@ class Parser:
                     break
 
                 case parser.Reduce(name=name, count=size, transparent=transparent):
-                    recover_trace(f"    {current_token.kind}")
-                    recover_trace(f"      {current_state}: REDUCE {name} {size}")
                     children: list[TokenValue | Tree] = []
                     for _, c in stack[-size:]:
                         if c is None:
@@ -345,10 +336,8 @@ class Parser:
                         children=tuple(children),
                     )
                     del stack[-size:]
-                    recover_trace(f"        -> {stack[-1][0]}")
                     goto = self.table.gotos[stack[-1][0]].get(name)
                     assert goto is not None
-                    recover_trace(f"          -> {goto}")
                     stack.append((goto, value))
 
                 case parser.Shift():
@@ -474,6 +463,12 @@ def leave_alt_screen():
     sys.stdout.buffer.write(CSI(b"?1049l"))
 
 
+def goto_cursor(x: int, y: int):
+    sx = str(x).encode("utf-8")
+    sy = str(y).encode("utf-8")
+    sys.stdout.buffer.write(CSI(sy + b";" + sx + b"H"))
+
+
 ###############################################################################
 # Dynamic Modules: Detect and Reload Modules when they Change
 ###############################################################################
@@ -574,6 +569,12 @@ class DynamicLexerModule(DynamicModule):
         return False
 
 
+class DisplayMode(enum.Enum):
+    TREE = 0
+    ERRORS = 1
+    LOG = 2
+
+
 class Harness:
     grammar_file: str
     grammar_member: str | None
@@ -583,6 +584,7 @@ class Harness:
     source: str | None
     table: parser.ParseTable | None
     tree: Tree | None
+    mode: DisplayMode
 
     def __init__(
         self, grammar_file, grammar_member, lexer_file, lexer_member, start_rule, source_path
@@ -593,6 +595,8 @@ class Harness:
         self.lexer_member = lexer_member
         self.start_rule = start_rule
         self.source_path = source_path
+
+        self.mode = DisplayMode.TREE
 
         self.source = None
         self.table = None
@@ -614,9 +618,15 @@ class Harness:
         while True:
             i, _, _ = select.select([sys.stdin], [], [], 1)
             if i:
-                k = sys.stdin.read(1)
-                print(f"Key {k}\r")
-                return
+                k = sys.stdin.read(1).lower()
+                if k == "q":
+                    return
+                elif k == "t":
+                    self.mode = DisplayMode.TREE
+                elif k == "e":
+                    self.mode = DisplayMode.ERRORS
+                elif k == "l":
+                    self.mode = DisplayMode.LOG
 
             self.update()
             self.render()
@@ -671,18 +681,33 @@ class Harness:
             print(f"No table\r")
         print(("\u2500" * cols) + "\r")
 
-        lines = list(RECOVER_TRACE)
+        lines = []
 
-        if self.errors is not None:
-            wrapper = textwrap.TextWrapper(width=cols, drop_whitespace=False)
-            lines.extend(line for error in self.errors for line in wrapper.wrap(error))
-            lines.append("")
+        match self.mode:
+            case DisplayMode.ERRORS:
+                if self.errors is not None:
+                    wrapper = textwrap.TextWrapper(width=cols, drop_whitespace=False)
+                    lines.extend(line for error in self.errors for line in wrapper.wrap(error))
 
-        if self.tree is not None:
-            self.format_node(lines, self.tree)
+            case DisplayMode.TREE:
+                if self.tree is not None:
+                    self.format_node(lines, self.tree)
 
-        for line in lines[: rows - 3]:
+            case DisplayMode.LOG:
+                pass
+
+            case _:
+                typing.assert_never(self.mode)
+
+        for line in lines[: rows - 4]:
             print(line[:cols] + "\r")
+
+        has_errors = "*" if self.errors else " "
+        has_tree = "*" if self.tree else " "
+        has_log = " "
+        goto_cursor(0, rows - 1)
+        print(("\u2500" * cols) + "\r")
+        print(f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (q)uit\r", end="")
 
         sys.stdout.flush()
         sys.stdout.buffer.flush()
@@ -742,6 +767,7 @@ def main(args: list[str]):
     try:
         tty.setraw(fd)
         enter_alt_screen()
+        sys.stdout.buffer.write(CSI(b"?25l"))
 
         h = Harness(
             grammar_file=parsed.grammar,
@@ -754,6 +780,7 @@ def main(args: list[str]):
         h.run()
 
     finally:
+        sys.stdout.buffer.write(CSI(b"?25h"))
         leave_alt_screen()
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
