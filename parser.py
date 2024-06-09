@@ -418,6 +418,9 @@ class Error(Action):
     pass
 
 
+ParseAction = Reduce | Shift | Accept | Error
+
+
 @dataclasses.dataclass
 class PossibleAction:
     name: str
@@ -555,13 +558,13 @@ class ErrorCollection:
 
 @dataclasses.dataclass
 class ParseTable:
-    actions: list[dict[str, Action]]
+    actions: list[dict[str, ParseAction]]
     gotos: list[dict[str, int]]
 
     def format(self):
         """Format a parser table so pretty."""
 
-        def format_action(actions: dict[str, Action], terminal: str):
+        def format_action(actions: dict[str, ParseAction], terminal: str):
             action = actions.get(terminal)
             match action:
                 case Accept():
@@ -612,13 +615,13 @@ class TableBuilder(object):
     """
 
     errors: ErrorCollection
-    actions: list[dict[str, Action]]
+    actions: list[dict[str, ParseAction]]
     gotos: list[dict[str, int]]
     alphabet: list[str]
     precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
     transparents: set[str]
 
-    action_row: None | list[typing.Tuple[None | Action, None | Configuration]]
+    action_row: None | list[typing.Tuple[None | ParseAction, None | Configuration]]
     goto_row: None | list[None | int]
 
     def __init__(
@@ -707,7 +710,7 @@ class TableBuilder(object):
         else:
             return self.precedence[config.core.name]
 
-    def _set_table_action(self, symbol_id: int, action: Action, config: Configuration | None):
+    def _set_table_action(self, symbol_id: int, action: ParseAction, config: Configuration | None):
         """Set the action for 'symbol' in the table row to 'action'.
 
         This is destructive; it changes the table. It records an error if
