@@ -169,12 +169,10 @@ class Repair:
         input: list[TokenValue],
         start: int,
     ):
-        rl = recover_log
-
         input_index = start + self.advance
-        if input_index >= len(input):
-            return
+        current_token = input[input_index].kind
 
+        rl = recover_log
         if rl.isEnabledFor(logging.INFO):
             valstr = f"({self.value})" if self.value is not None else ""
             rl.debug(f"{self.repair.value}{valstr} @ {self.cost} input:{input_index}")
@@ -197,10 +195,13 @@ class Repair:
             if new_stack is None:
                 # Not clear why this is necessary, but I think state merging
                 # causes us to occasionally have reduce actions that lead to
-                # errors.
+                # errors. It's not a bug, technically, to insert a reduce in
+                # a table that leads to a syntax error... "I don't know what
+                # happens but I do know that if I see this I'm at the end of
+                # this production I'm in!"
                 continue
 
-            if token == input[input_index].kind:
+            if token == current_token:
                 rl.debug(f"  generate shift {token}")
                 yield Repair(
                     repair=RepairAction.Shift,
@@ -208,17 +209,21 @@ class Repair:
                     stack=new_stack,
                     cost=0,  # Shifts are free.
                     advance=1,  # Move forward by one.
+                    success=success,
                 )
 
-            rl.debug(f"  generate insert {token}")
-            yield Repair(
-                repair=RepairAction.Insert,
-                value=token,
-                parent=self,
-                stack=new_stack,
-                cost=1,  # TODO: Configurable token costs
-                success=success,
-            )
+            # Never generate an insert for EOF, that might cause us to cut
+            # off large parts of the tree!
+            if token != "$":
+                rl.debug(f"  generate insert {token}")
+                yield Repair(
+                    repair=RepairAction.Insert,
+                    value=token,
+                    parent=self,
+                    stack=new_stack,
+                    cost=1,  # TODO: Configurable token costs
+                    success=success,
+                )
 
         # For delete: produce a repair that just advances the input token
         # stream, but does not manipulate the stack at all. Obviously we can
@@ -226,13 +231,13 @@ class Repair:
         # a "delete" if the previous repair was an "insert". (Only allow
         # delete-insert pairs, not insert-delete, because they are
         # symmetrical and therefore a waste of time and memory.)
-        if self.repair != RepairAction.Insert:
+        if self.repair != RepairAction.Insert and current_token != "$":
             rl.debug(f"  generate delete")
             yield Repair(
                 repair=RepairAction.Delete,
                 parent=self,
                 stack=self.stack,
-                cost=3,  # TODO: Configurable token costs
+                cost=2,  # TODO: Configurable token costs
                 advance=1,
             )
 
@@ -624,6 +629,10 @@ class Harness:
     mode: DisplayMode
     log_handler: ListHandler
 
+    lines: list[str] | None
+    line_start: int
+    last_cols: int
+
     def __init__(
         self, grammar_file, grammar_member, lexer_file, lexer_member, start_rule, source_path
     ):
@@ -646,7 +655,9 @@ class Harness:
         self.average_entries = 0
         self.max_entries = 0
 
+        self.lines = None
         self.line_start = 0
+        self.last_cols = 0
 
         self.grammar_module = DynamicGrammarModule(
             self.grammar_file, self.grammar_member, self.start_rule
@@ -666,14 +677,20 @@ class Harness:
                     return
                 elif k == "t":
                     self.mode = DisplayMode.TREE
+                    self.lines = None
                 elif k == "e":
                     self.mode = DisplayMode.ERRORS
+                    self.lines = None
                 elif k == "l":
                     self.mode = DisplayMode.LOG
+                    self.lines = None
                 elif k == "j":
                     self.line_start = self.line_start - 1
                 elif k == "k":
                     self.line_start = self.line_start + 1
+                elif k == "\x05":
+                    if self.lines is not None:
+                        self.line_start = len(self.lines)
 
             self.update()
             self.render()
@@ -729,6 +746,39 @@ class Harness:
             print(f"No table\r")
         print(("\u2500" * cols) + "\r")
 
+        # Actual content.
+        # If the width changed we need to re-render, sorry.
+        if cols != self.last_cols:
+            self.lines = None
+            self.last_cols = cols
+
+        lines = self.lines
+        if lines is None:
+            lines = self.render_lines(cols)
+            self.lines = lines
+
+        if self.line_start > len(lines) - (rows - 4):
+            self.line_start = len(lines) - (rows - 4)
+        if self.line_start < 0:
+            self.line_start = 0
+
+        line_start = max(self.line_start, 0)
+        line_end = min(self.line_start + (rows - 4), len(lines))
+
+        for index in range(line_start, line_end):
+            print(lines[index] + "\r")
+
+        has_errors = "*" if self.errors else " "
+        has_tree = "*" if self.tree else " "
+        has_log = " " if self.log_handler.logs else " "
+        goto_cursor(0, rows - 1)
+        print(("\u2500" * cols) + "\r")
+        print(f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (q)uit\r", end="")
+
+        sys.stdout.flush()
+        sys.stdout.buffer.flush()
+
+    def render_lines(self, cols: int):
         lines = []
 
         match self.mode:
@@ -767,24 +817,7 @@ class Harness:
             for wl in wrapper.wrap(f"{i: >{line_number_chars}} {line}")
         ]
 
-        if self.line_start < 0:
-            self.line_start = 0
-        if self.line_start > len(lines) - (rows - 4):
-            self.line_start = len(lines) - (rows - 4)
-        line_end = self.line_start + (rows - 4)
-
-        for line in lines[self.line_start : line_end]:
-            print(line[:cols] + "\r")
-
-        has_errors = "*" if self.errors else " "
-        has_tree = "*" if self.tree else " "
-        has_log = " " if self.log_handler.logs else " "
-        goto_cursor(0, rows - 1)
-        print(("\u2500" * cols) + "\r")
-        print(f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (q)uit\r", end="")
-
-        sys.stdout.flush()
-        sys.stdout.buffer.flush()
+        return lines
 
     def format_node(self, lines, node: Tree | TokenValue, indent=0):
         """Print out an indented concrete syntax tree, from parse()."""
