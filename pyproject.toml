@@ -2,12 +2,27 @@
 name = "lrparsers"
 descrption = "a small LR parser generator library"
 authors = [
-  {name = "John Doty", email = "john@d0ty.me"},
+    {name = "John Doty", email = "john@d0ty.me"},
 ]
 classifiers = [
   "Private :: Do Not Upload", # Probably.
   "License :: OSI Approved :: MIT License",
 ]
+version = "0.1.0"
+dependencies = []
+requires-python = ">=3.12"
+readme = "README.md"
 
 [tool.black]
 line-length=100
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.dev-dependencies]
+dev = [
+    "pytest>=8.2.2",
+]
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
