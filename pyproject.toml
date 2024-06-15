@@ -23,6 +23,12 @@ distribution = true
 dev = [
     "pytest>=8.2.2",
 ]
+
+[tool.pyright]
+exclude = ["historical", ".venv"]
+venvPath = "."
+venv = ".venv"
+
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
