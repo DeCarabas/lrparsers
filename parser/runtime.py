@@ -5,7 +5,7 @@ import logging
 import typing
 from dataclasses import dataclass
 
-from . import parser  # pyright: ignore # You're drunk.
+from . import parser
 
 
 @dataclass
@@ -267,17 +267,27 @@ def recover(table: parser.ParseTable, input: list[TokenValue], start: int, stack
 action_log = logging.getLogger("parser.action")
 
 
+class TokenStream(typing.Protocol):
+    def tokens(self) -> list[typing.Tuple[parser.Terminal, int, int]]:
+        """The tokens in the stream, in the form (terminal, start, length)."""
+        ...
+
+    def lines(self) -> list[int]:
+        """The offsets of line breaks in the tokens. (The end of line 0 is at
+        index 0, etc.)"""
+        ...
+
+
 class Parser:
     # Our stack is a stack of tuples, where the first entry is the state
     # number and the second entry is the 'value' that was generated when the
     # state was pushed.
     table: parser.ParseTable
 
-    def __init__(self, table, trace):
-        self.trace = trace
+    def __init__(self, table):
         self.table = table
 
-    def parse(self, tokens) -> typing.Tuple[Tree | None, list[str]]:
+    def parse(self, tokens: TokenStream) -> typing.Tuple[Tree | None, list[str]]:
         input_tokens = tokens.tokens()
         input: list[TokenValue] = [
             TokenValue(kind=kind.value, start=start, end=start + length)
@@ -406,15 +416,17 @@ class Parser:
 
         # All done.
         error_strings = []
-        for parse_error in errors:
-            line_index = bisect.bisect_left(tokens.lines, parse_error.start)
-            if line_index == 0:
-                col_start = 0
-            else:
-                col_start = tokens.lines[line_index - 1] + 1
-            column_index = parse_error.start - col_start
-            line_index += 1
+        if errors:
+            lines = tokens.lines()
+            for parse_error in errors:
+                line_index = bisect.bisect_left(lines, parse_error.start)
+                if line_index == 0:
+                    col_start = 0
+                else:
+                    col_start = lines[line_index - 1] + 1
+                column_index = parse_error.start - col_start
+                line_index += 1
 
-            error_strings.append(f"{line_index}:{column_index}: {parse_error.message}")
+                error_strings.append(f"{line_index}:{column_index}: {parse_error.message}")
 
         return (result, error_strings)

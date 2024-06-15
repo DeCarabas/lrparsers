@@ -300,7 +300,7 @@ class Harness:
 
             # print(f"{tokens.lines}")
             # tokens.dump(end=5)
-            (tree, errors) = runtime.Parser(table, trace=None).parse(self.tokens)
+            (tree, errors) = runtime.Parser(table).parse(self.tokens)
             parse_time = time.time()
             self.tree = tree
             self.errors = errors

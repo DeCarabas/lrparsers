@@ -1,3 +1,3 @@
 .PHONY: test
 test:
-	pytest
+	pdm run pytest

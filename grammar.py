@@ -1,5 +1,6 @@
 # This is an example grammar.
 import re
+import typing
 
 import parser
 from parser import Assoc, Grammar, Nothing, Terminal, rule, seq, Rule
@@ -517,11 +518,14 @@ import bisect
 class FineTokens:
     def __init__(self, src: str):
         self.src = src
-        self._tokens = list(tokenize(src))
-        self.lines = [m.start() for m in re.finditer("\n", src)]
+        self._tokens: list[typing.Tuple[Terminal, int, int]] = list(tokenize(src))
+        self._lines = [m.start() for m in re.finditer("\n", src)]
 
     def tokens(self):
         return self._tokens
+
+    def lines(self):
+        return self._lines
 
     def dump(self, *, start=None, end=None):
         if start is None:
@@ -531,11 +535,11 @@ class FineTokens:
 
         for token in self._tokens[start:end]:
             (kind, start, length) = token
-            line_index = bisect.bisect_left(self.lines, start)
+            line_index = bisect.bisect_left(self._lines, start)
             if line_index == 0:
                 col_start = 0
             else:
-                col_start = self.lines[line_index - 1] + 1
+                col_start = self._lines[line_index - 1] + 1
             column_index = start - col_start
             value = self.src[start : start + length]
             print(f"{start:04} {kind.value:12} {value} ({line_index}, {column_index})")
