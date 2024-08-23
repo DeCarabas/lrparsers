@@ -21,19 +21,20 @@ To get started, create a grammar that derives from the `Grammar` class. Create
 one method per nonterminal, decorated with the `rule` decorator. Here's an
 example:
 
-    PLUS = Terminal('+')
-    LPAREN = Terminal('(')
-    RPAREN = Terminal(')')
-    ID = Terminal('id')
 
     class SimpleGrammar(Grammar):
         @rule
         def expression(self):
-            return seq(self.expression, PLUS, self.term) | self.term
+            return seq(self.expression, self.PLUS, self.term) | self.term
 
         @rule
         def term(self):
-            return seq(LPAREN, self.expression, RPAREN) | ID
+            return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
+
+        PLUS = Terminal('+')
+        LPAREN = Terminal('(')
+        RPAREN = Terminal(')')
+        ID = Terminal('id')
 
 
 ## Using grammars
@@ -1605,10 +1606,14 @@ class Rule:
 class Terminal(Rule):
     """A token, or terminal symbol in the grammar."""
 
-    value: str
+    value: str | None
+    pattern: str
+    regex: bool
 
-    def __init__(self, value):
-        self.value = sys.intern(value)
+    def __init__(self, pattern, name=None, regex=False):
+        self.value = name
+        self.pattern = pattern
+        self.regex = regex
 
     def flatten(self) -> typing.Generator[list["str | Terminal"], None, None]:
         # We are just ourselves when flattened.
@@ -1766,19 +1771,20 @@ class Grammar:
 
     Here's an example of a simple grammar:
 
-        PLUS = Terminal('+')
-        LPAREN = Terminal('(')
-        RPAREN = Terminal(')')
-        ID = Terminal('id')
-
         class SimpleGrammar(Grammar):
             @rule
             def expression(self):
-                return seq(self.expression, PLUS, self.term) | self.term
+                return seq(self.expression, self.PLUS, self.term) | self.term
 
             @rule
             def term(self):
-                return seq(LPAREN, self.expression, RPAREN) | ID
+                return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
+
+            PLUS = Terminal('+')
+            LPAREN = Terminal('(')
+            RPAREN = Terminal(')')
+            ID = Terminal('id')
+
 
     Not very exciting, perhaps, but it's something.
     """
@@ -1786,6 +1792,7 @@ class Grammar:
     _precedence: dict[str, typing.Tuple[Assoc, int]]
     _start: str
     _generator: type[GenerateLR0]
+    _terminals: list[Terminal]
 
     def __init__(
         self,
@@ -1809,6 +1816,14 @@ class Grammar:
             generator = getattr(self, "generator", GenerateLALR)
         assert generator is not None
 
+        # Fixup terminal names with the name of the member that declared it.
+        terminals = []
+        for n, t in inspect.getmembers(self, lambda x: isinstance(x, Terminal)):
+            if t.value is None:
+                t.value = n
+            terminals.append(t)
+
+        # Fix up the precedence table.
         precedence_table = {}
         for prec, (associativity, symbols) in enumerate(precedence):
             for symbol in symbols:
@@ -1824,6 +1839,11 @@ class Grammar:
         self._precedence = precedence_table
         self._start = start
         self._generator = generator
+        self._terminals = terminals
+
+    @property
+    def terminals(self) -> list[Terminal]:
+        return self._terminals
 
     def generate_nonterminal_dict(
         self, start: str | None = None
@@ -1911,3 +1931,149 @@ class Grammar:
         gen = generator(start, desugared, precedence=self._precedence, transparents=transparents)
         table = gen.gen_table()
         return table
+
+
+###############################################################################
+# Lexer support
+###############################################################################
+# For machine-generated lexers
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Span:
+    lower: int  # inclusive
+    upper: int  # exclusive
+
+    @classmethod
+    def from_str(cls, c: str) -> "Span":
+        return Span(lower=ord(c), upper=ord(c) + 1)
+
+    def intersects(self, other: "Span") -> bool:
+        return self.lower < other.upper and self.upper > other.lower
+
+    def split(self, other: "Span") -> tuple["Span|None", "Span", "Span|None"]:
+        assert self.intersects(other)
+
+        first = min(self.lower, other.lower)
+        second = max(self.lower, other.lower)
+        third = min(self.upper, other.upper)
+        fourth = max(self.upper, other.upper)
+
+        low = Span(first, second) if first != second else None
+        mid = Span(second, third)
+        hi = Span(third, fourth) if third != fourth else None
+
+        return (low, mid, hi)
+
+    def __str__(self) -> str:
+        if self.upper - self.lower == 1:
+            return str(self.lower)
+
+        lower = str(self.lower)
+        upper = str(self.upper)
+        return f"[{lower}-{upper})"
+
+    def __lt__(self, other: "Span") -> bool:
+        return self.lower < other.lower
+
+
+ET = typing.TypeVar("ET")
+
+
+class EdgeList[ET]:
+    """A list of edge transitions, keyed by *span*. A given span can have
+    multiple targets, because this supports NFAs."""
+
+    _edges: list[tuple[Span, list[ET]]]
+
+    def __init__(self):
+        self._edges = []
+
+    def __iter__(self) -> typing.Iterator[tuple[Span, list[ET]]]:
+        return iter(self._edges)
+
+    def __repr__(self) -> str:
+        return f"EdgeList[{','.join(str(s[0]) + '->' + repr(s[1]) for s in self._edges)}]"
+
+    def add_edge(self, c: Span, s: ET):
+        """Add an edge for the given span to the list. If there are already
+        spans that overlap this one, split and generating multiple distinct
+        edges.
+        """
+        # print(f"  Adding {c}->{s} to {self}...")
+        # Look to see where we would put this span based solely on a
+        # sort of lower bounds.
+        point = bisect.bisect_left(self._edges, c, key=lambda x: x[0])
+
+        # If this is not the first span in the list then we might
+        # overlap with the span to our left....
+        if point > 0:
+            left_point = point - 1
+            left_span, left_targets = self._edges[left_point]
+            if c.intersects(left_span):
+                # ...if we intersect with the span to our left then we
+                # must split the span to our left with regards to our
+                # span. Then we have three target spans:
+                #
+                #   - The lo one, which just has the targets from the old
+                #     left span. (This may be empty if we overlap the
+                #     left one completely on the left side.)
+                #
+                #   - The mid one, which has both the targets from the
+                #     old left and the new target.
+                #
+                #   - The hi one, which if it exists only has our target.
+                #     If it exists it basically replaces the current span
+                #     for our future processing. (If not, then our span
+                #     is completely subsumed into the left span and we
+                #     can stop.)
+                #
+                del self._edges[left_point]
+                lo, mid, hi = c.split(left_span)
+                # print(f"    <- {c} splits {left_span} -> {lo}, {mid}, {hi}  @{left_point}")
+                self._edges.insert(left_point, (mid, left_targets + [s]))
+                if lo is not None:
+                    self._edges.insert(left_point, (lo, left_targets))
+                if hi is None or not hi.intersects(c):
+                    # Yup, completely subsumed.
+                    # print(f"      result: {self} (left out)")
+                    return
+
+                # Continue processing with `c` as the hi split from the
+                # left. If the left and right spans abut each other then
+                # `c` will be subsumed in our right span.
+                c = hi
+
+        # If point is not at the very end of the list then it might
+        # overlap the span to our right...
+        if point < len(self._edges):
+            right_span, right_targets = self._edges[point]
+            if c.intersects(right_span):
+                # ...this is similar to the left case, above, except the
+                # lower bound has the targets that our only ours, etc.
+                del self._edges[point]
+                lo, mid, hi = c.split(right_span)
+                # print(f"    -> {c} splits {right_span} -> {lo}, {mid}, {hi}  @{point}")
+                if hi is not None:
+                    self._edges.insert(point, (hi, right_targets))
+                self._edges.insert(point, (mid, right_targets + [s]))
+                if lo is None or not lo.intersects(c):
+                    # Our span is completely subsumed on the lower side
+                    # of the range; there is no lower side that just has
+                    # our targets. Bail now.
+                    # print(f"      result: {self} (right out)")
+                    return
+
+                # Continue processing with `c` as the lo split, since
+                # that's the one that has only the specified state as the
+                # target.
+                c = lo
+
+        # If we made it here then either we have a point that does not
+        # intersect at all, or it only partially intersects on either the
+        # left or right. Either way, we have ensured that:
+        #
+        #  - c doesn't intersect with left or right (any more)
+        #  - point is where it should go
+        self._edges.insert(point, (c, [s]))
+        # print(f"      result: {self} (done)")

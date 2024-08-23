@@ -2,57 +2,7 @@
 import re
 import typing
 
-import parser
-from parser import Assoc, Grammar, Nothing, Terminal, rule, seq, Rule
-
-ARROW = Terminal("Arrow")
-AS = Terminal("As")
-BAR = Terminal("Bar")
-CLASS = Terminal("Class")
-COLON = Terminal("Colon")
-ELSE = Terminal("Else")
-FOR = Terminal("For")
-FUN = Terminal("Fun")
-IDENTIFIER = Terminal("Identifier")
-IF = Terminal("If")
-IMPORT = Terminal("Import")
-IN = Terminal("In")
-LCURLY = Terminal("LeftBrace")
-LET = Terminal("Let")
-RCURLY = Terminal("RightBrace")
-RETURN = Terminal("Return")
-SEMICOLON = Terminal("Semicolon")
-STRING = Terminal("String")
-WHILE = Terminal("While")
-EQUAL = Terminal("Equal")
-LPAREN = Terminal("LeftParen")
-RPAREN = Terminal("RightParen")
-COMMA = Terminal("Comma")
-SELF = Terminal("Selff")
-OR = Terminal("Or")
-IS = Terminal("Is")
-AND = Terminal("And")
-EQUALEQUAL = Terminal("EqualEqual")
-BANGEQUAL = Terminal("BangEqual")
-LESS = Terminal("Less")
-GREATER = Terminal("Greater")
-LESSEQUAL = Terminal("LessEqual")
-GREATEREQUAL = Terminal("GreaterEqual")
-PLUS = Terminal("Plus")
-MINUS = Terminal("Minus")
-STAR = Terminal("Star")
-SLASH = Terminal("Slash")
-NUMBER = Terminal("Number")
-TRUE = Terminal("True")
-FALSE = Terminal("False")
-BANG = Terminal("Bang")
-DOT = Terminal("Dot")
-MATCH = Terminal("Match")
-EXPORT = Terminal("Export")
-UNDERSCORE = Terminal("Underscore")
-NEW = Terminal("New")
-LSQUARE = Terminal("LeftBracket")
-RSQUARE = Terminal("RightBracket")
+from parser import Assoc, Grammar, Nothing, rule, seq, Rule, Terminal
 
 
 class FineGrammar(Grammar):
@@ -62,17 +12,17 @@ class FineGrammar(Grammar):
     def __init__(self):
         super().__init__(
             precedence=[
-                (Assoc.RIGHT, [EQUAL]),
-                (Assoc.LEFT, [OR]),
-                (Assoc.LEFT, [IS]),
-                (Assoc.LEFT, [AND]),
-                (Assoc.LEFT, [EQUALEQUAL, BANGEQUAL]),
-                (Assoc.LEFT, [LESS, GREATER, GREATEREQUAL, LESSEQUAL]),
-                (Assoc.LEFT, [PLUS, MINUS]),
-                (Assoc.LEFT, [STAR, SLASH]),
+                (Assoc.RIGHT, [self.EQUAL]),
+                (Assoc.LEFT, [self.OR]),
+                (Assoc.LEFT, [self.IS]),
+                (Assoc.LEFT, [self.AND]),
+                (Assoc.LEFT, [self.EQUALEQUAL, self.BANGEQUAL]),
+                (Assoc.LEFT, [self.LESS, self.GREATER, self.GREATEREQUAL, self.LESSEQUAL]),
+                (Assoc.LEFT, [self.PLUS, self.MINUS]),
+                (Assoc.LEFT, [self.STAR, self.SLASH]),
                 (Assoc.LEFT, [self.primary_expression]),
-                (Assoc.LEFT, [LPAREN]),
-                (Assoc.LEFT, [DOT]),
+                (Assoc.LEFT, [self.LPAREN]),
+                (Assoc.LEFT, [self.DOT]),
                 #
                 # If there's a confusion about whether to make an IF
                 # statement or an expression, prefer the statement.
@@ -97,15 +47,15 @@ class FineGrammar(Grammar):
 
     @rule
     def import_statement(self) -> Rule:
-        return seq(IMPORT, STRING, AS, IDENTIFIER, SEMICOLON)
+        return seq(self.IMPORT, self.STRING, self.AS, self.IDENTIFIER, self.SEMICOLON)
 
     @rule("ClassDeclaration")
     def class_declaration(self) -> Rule:
-        return seq(CLASS, IDENTIFIER, self._class_body)
+        return seq(self.CLASS, self.IDENTIFIER, self._class_body)
 
     @rule
     def _class_body(self) -> Rule:
-        return seq(LCURLY, RCURLY) | seq(LCURLY, self._class_members, RCURLY)
+        return seq(self.LCURLY, self.RCURLY) | seq(self.LCURLY, self._class_members, self.RCURLY)
 
     @rule
     def _class_members(self) -> Rule:
@@ -117,7 +67,7 @@ class FineGrammar(Grammar):
 
     @rule("FieldDecl")
     def field_declaration(self) -> Rule:
-        return seq(IDENTIFIER, COLON, self.type_expression, SEMICOLON)
+        return seq(self.IDENTIFIER, self.COLON, self.type_expression, self.SEMICOLON)
 
     # Types
     @rule("TypeExpression")
@@ -126,60 +76,65 @@ class FineGrammar(Grammar):
 
     @rule("AlternateType")
     def alternate_type(self) -> Rule:
-        return seq(self.type_expression, OR, self.type_identifier)
+        return seq(self.type_expression, self.OR, self.type_identifier)
 
     @rule("TypeIdentifier")
     def type_identifier(self) -> Rule:
-        return IDENTIFIER
+        return self.IDENTIFIER
 
     @rule
     def export_statement(self) -> Rule:
         return (
-            seq(EXPORT, self.class_declaration)
-            | seq(EXPORT, self.function_declaration)
-            | seq(EXPORT, self.let_statement)
-            | seq(EXPORT, self.export_list, SEMICOLON)
+            seq(self.EXPORT, self.class_declaration)
+            | seq(self.EXPORT, self.function_declaration)
+            | seq(self.EXPORT, self.let_statement)
+            | seq(self.EXPORT, self.export_list, self.SEMICOLON)
         )
 
     @rule
     def export_list(self) -> Rule:
-        return Nothing | IDENTIFIER | seq(IDENTIFIER, COMMA, self.export_list)
+        return Nothing | self.IDENTIFIER | seq(self.IDENTIFIER, self.COMMA, self.export_list)
 
     # Functions
     @rule("FunctionDecl")
     def function_declaration(self) -> Rule:
-        return seq(FUN, IDENTIFIER, self.function_parameters, self.block) | seq(
-            FUN, IDENTIFIER, self.function_parameters, ARROW, self.type_expression, self.block
+        return seq(self.FUN, self.IDENTIFIER, self.function_parameters, self.block) | seq(
+            self.FUN,
+            self.IDENTIFIER,
+            self.function_parameters,
+            self.ARROW,
+            self.type_expression,
+            self.block,
         )
 
     @rule("ParamList")
     def function_parameters(self) -> Rule:
         return (
-            seq(LPAREN, RPAREN)
-            | seq(LPAREN, self._first_parameter, RPAREN)
-            | seq(LPAREN, self._first_parameter, COMMA, self._parameter_list, RPAREN)
+            seq(self.LPAREN, self.RPAREN)
+            | seq(self.LPAREN, self._first_parameter, self.RPAREN)
+            | seq(self.LPAREN, self._first_parameter, self.COMMA, self._parameter_list, self.RPAREN)
         )
 
     @rule
     def _first_parameter(self) -> Rule:
-        return SELF | self.parameter
+        return self.SELF | self.parameter
 
     @rule
     def _parameter_list(self) -> Rule:
-        return Nothing | self.parameter | seq(self.parameter, COMMA, self._parameter_list)
+        return Nothing | self.parameter | seq(self.parameter, self.COMMA, self._parameter_list)
 
     @rule("Parameter")
     def parameter(self) -> Rule:
-        return seq(IDENTIFIER, COLON, self.type_expression)
+        return seq(self.IDENTIFIER, self.COLON, self.type_expression)
 
     # Block
     @rule("Block")
     def block(self) -> Rule:
         return (
-            seq(LCURLY, RCURLY)
-            | seq(LCURLY, self.expression, RCURLY)
-            | seq(LCURLY, self._statement_list, RCURLY)
-            | seq(LCURLY, self._statement_list, self.expression, RCURLY)
+            seq(self.LCURLY, self.RCURLY)
+            | seq(self.LCURLY, self.expression, self.RCURLY)
+            | seq(self.LCURLY, self._statement_list, self.RCURLY)
+            | seq(self.LCURLY, self._statement_list, self.expression, self.RCURLY)
         )
 
     @rule
@@ -200,19 +155,19 @@ class FineGrammar(Grammar):
 
     @rule("LetStatement")
     def let_statement(self) -> Rule:
-        return seq(LET, IDENTIFIER, EQUAL, self.expression, SEMICOLON)
+        return seq(self.LET, self.IDENTIFIER, self.EQUAL, self.expression, self.SEMICOLON)
 
     @rule("ReturnStatement")
     def return_statement(self) -> Rule:
-        return seq(RETURN, self.expression, SEMICOLON) | seq(RETURN, SEMICOLON)
+        return seq(self.RETURN, self.expression, self.SEMICOLON) | seq(self.RETURN, self.SEMICOLON)
 
     @rule("ForStatement")
     def for_statement(self) -> Rule:
-        return seq(FOR, self.iterator_variable, IN, self.expression, self.block)
+        return seq(self.FOR, self.iterator_variable, self.IN, self.expression, self.block)
 
     @rule("IteratorVariable")
     def iterator_variable(self) -> Rule:
-        return IDENTIFIER
+        return self.IDENTIFIER
 
     @rule("IfStatement")
     def if_statement(self) -> Rule:
@@ -220,11 +175,11 @@ class FineGrammar(Grammar):
 
     @rule
     def while_statement(self) -> Rule:
-        return seq(WHILE, self.expression, self.block)
+        return seq(self.WHILE, self.expression, self.block)
 
     @rule
     def expression_statement(self) -> Rule:
-        return seq(self.expression, SEMICOLON)
+        return seq(self.expression, self.SEMICOLON)
 
     # Expressions
     @rule(transparent=True)
@@ -234,91 +189,93 @@ class FineGrammar(Grammar):
     @rule("BinaryExpression")
     def binary_expression(self) -> Rule:
         return (
-            seq(self.expression, EQUAL, self.expression)
-            | seq(self.expression, OR, self.expression)
-            | seq(self.expression, AND, self.expression)
-            | seq(self.expression, EQUALEQUAL, self.expression)
-            | seq(self.expression, BANGEQUAL, self.expression)
-            | seq(self.expression, LESS, self.expression)
-            | seq(self.expression, LESSEQUAL, self.expression)
-            | seq(self.expression, GREATER, self.expression)
-            | seq(self.expression, GREATEREQUAL, self.expression)
-            | seq(self.expression, PLUS, self.expression)
-            | seq(self.expression, MINUS, self.expression)
-            | seq(self.expression, STAR, self.expression)
-            | seq(self.expression, SLASH, self.expression)
+            seq(self.expression, self.EQUAL, self.expression)
+            | seq(self.expression, self.OR, self.expression)
+            | seq(self.expression, self.AND, self.expression)
+            | seq(self.expression, self.EQUALEQUAL, self.expression)
+            | seq(self.expression, self.BANGEQUAL, self.expression)
+            | seq(self.expression, self.LESS, self.expression)
+            | seq(self.expression, self.LESSEQUAL, self.expression)
+            | seq(self.expression, self.GREATER, self.expression)
+            | seq(self.expression, self.GREATEREQUAL, self.expression)
+            | seq(self.expression, self.PLUS, self.expression)
+            | seq(self.expression, self.MINUS, self.expression)
+            | seq(self.expression, self.STAR, self.expression)
+            | seq(self.expression, self.SLASH, self.expression)
         )
 
     @rule("IsExpression")
     def is_expression(self) -> Rule:
-        return seq(self.expression, IS, self.pattern)
+        return seq(self.expression, self.IS, self.pattern)
 
     @rule
     def primary_expression(self) -> Rule:
         return (
             self.identifier_expression
             | self.literal_expression
-            | SELF
-            | seq(BANG, self.primary_expression)
-            | seq(MINUS, self.primary_expression)
+            | self.SELF
+            | seq(self.BANG, self.primary_expression)
+            | seq(self.MINUS, self.primary_expression)
             | self.block
             | self.conditional_expression
             | self.list_constructor_expression
             | self.object_constructor_expression
             | self.match_expression
-            | seq(self.primary_expression, LPAREN, RPAREN)
-            | seq(self.primary_expression, LPAREN, self._expression_list, RPAREN)
-            | seq(self.primary_expression, DOT, IDENTIFIER)
-            | seq(LPAREN, self.expression, RPAREN)
+            | seq(self.primary_expression, self.LPAREN, self.RPAREN)
+            | seq(self.primary_expression, self.LPAREN, self._expression_list, self.RPAREN)
+            | seq(self.primary_expression, self.DOT, self.IDENTIFIER)
+            | seq(self.LPAREN, self.expression, self.RPAREN)
         )
 
     @rule("IdentifierExpression")
     def identifier_expression(self):
-        return IDENTIFIER
+        return self.IDENTIFIER
 
     @rule("Literal")
     def literal_expression(self):
-        return NUMBER | STRING | TRUE | FALSE
+        return self.NUMBER | self.STRING | self.TRUE | self.FALSE
 
     @rule("ConditionalExpression")
     def conditional_expression(self) -> Rule:
         return (
-            seq(IF, self.expression, self.block)
-            | seq(IF, self.expression, self.block, ELSE, self.conditional_expression)
-            | seq(IF, self.expression, self.block, ELSE, self.block)
+            seq(self.IF, self.expression, self.block)
+            | seq(self.IF, self.expression, self.block, self.ELSE, self.conditional_expression)
+            | seq(self.IF, self.expression, self.block, self.ELSE, self.block)
         )
 
     @rule
     def list_constructor_expression(self) -> Rule:
-        return seq(LSQUARE, RSQUARE) | seq(LSQUARE, self._expression_list, RSQUARE)
+        return seq(self.LSQUARE, self.RSQUARE) | seq(
+            self.LSQUARE, self._expression_list, self.RSQUARE
+        )
 
     @rule
     def _expression_list(self) -> Rule:
         return (
             self.expression
-            | seq(self.expression, COMMA)
-            | seq(self.expression, COMMA, self._expression_list)
+            | seq(self.expression, self.COMMA)
+            | seq(self.expression, self.COMMA, self._expression_list)
         )
 
     @rule
     def match_expression(self) -> Rule:
-        return seq(MATCH, self.expression, self.match_body)
+        return seq(self.MATCH, self.expression, self.match_body)
 
     @rule("MatchBody")
     def match_body(self) -> Rule:
-        return seq(LCURLY, RCURLY) | seq(LCURLY, self._match_arms, RCURLY)
+        return seq(self.LCURLY, self.RCURLY) | seq(self.LCURLY, self._match_arms, self.RCURLY)
 
     @rule
     def _match_arms(self) -> Rule:
         return (
             self.match_arm
-            | seq(self.match_arm, COMMA)
-            | seq(self.match_arm, COMMA, self._match_arms)
+            | seq(self.match_arm, self.COMMA)
+            | seq(self.match_arm, self.COMMA, self._match_arms)
         )
 
     @rule("MatchArm")
     def match_arm(self) -> Rule:
-        return seq(self.pattern, ARROW, self.expression)
+        return seq(self.pattern, self.ARROW, self.expression)
 
     @rule("Pattern")
     def pattern(self) -> Rule:
@@ -330,7 +287,7 @@ class FineGrammar(Grammar):
 
     @rule
     def _pattern_predicate(self) -> Rule:
-        return seq(AND, self.expression)
+        return seq(self.AND, self.expression)
 
     @rule
     def _pattern_core(self) -> Rule:
@@ -338,60 +295,116 @@ class FineGrammar(Grammar):
 
     @rule("WildcardPattern")
     def wildcard_pattern(self) -> Rule:
-        return UNDERSCORE
+        return self.UNDERSCORE
 
     @rule("VariableBinding")
     def variable_binding(self) -> Rule:
-        return seq(IDENTIFIER, COLON)
+        return seq(self.IDENTIFIER, self.COLON)
 
     @rule
     def object_constructor_expression(self) -> Rule:
-        return seq(NEW, self.type_identifier, self.field_list)
+        return seq(self.NEW, self.type_identifier, self.field_list)
 
     @rule
     def field_list(self) -> Rule:
-        return seq(LCURLY, RCURLY) | seq(LCURLY, self.field_values, RCURLY)
+        return seq(self.LCURLY, self.RCURLY) | seq(self.LCURLY, self.field_values, self.RCURLY)
 
     @rule
     def field_values(self) -> Rule:
         return (
             self.field_value
-            | seq(self.field_value, COMMA)
-            | seq(self.field_value, COMMA, self.field_values)
+            | seq(self.field_value, self.COMMA)
+            | seq(self.field_value, self.COMMA, self.field_values)
         )
 
     @rule
     def field_value(self) -> Rule:
-        return IDENTIFIER | seq(IDENTIFIER, COLON, self.expression)
+        return self.IDENTIFIER | seq(self.IDENTIFIER, self.COLON, self.expression)
+
+    BLANK = Terminal("[ \t\r\n]+", regex=True)
+
+    ARROW = Terminal("->")
+    AS = Terminal("as")
+    BAR = Terminal("bar")
+    CLASS = Terminal("class")
+    COLON = Terminal("colon")
+    COMMENT = Terminal("comment")
+    ELSE = Terminal("else")
+    FOR = Terminal("for")
+    FUN = Terminal("fun")
+    IDENTIFIER = Terminal("[A-Za-z_][A-Za-z0-9_]*", regex=True)
+    IF = Terminal("if")
+    IMPORT = Terminal("import")
+    IN = Terminal("in")
+    LCURLY = Terminal("{")
+    LET = Terminal("Let")
+    RCURLY = Terminal("}")
+    RETURN = Terminal("return")
+    SEMICOLON = Terminal(";")
+    STRING = Terminal('""', regex=True)
+    WHILE = Terminal("while")
+    EQUAL = Terminal("=")
+    LPAREN = Terminal("(")
+    RPAREN = Terminal(")")
+    COMMA = Terminal(",")
+    SELF = Terminal("self", name="SELFF")
+    OR = Terminal("or")
+    IS = Terminal("is")
+    AND = Terminal("and")
+    EQUALEQUAL = Terminal("==")
+    BANGEQUAL = Terminal("!=")
+    LESS = Terminal("<")
+    GREATER = Terminal(">")
+    LESSEQUAL = Terminal("<=")
+    GREATEREQUAL = Terminal(">=")
+    PLUS = Terminal("+")
+    MINUS = Terminal("-")
+    STAR = Terminal("*")
+    SLASH = Terminal("/")
+    NUMBER = Terminal("[0-9]+", regex=True)
+    TRUE = Terminal("true")
+    FALSE = Terminal("false")
+    BANG = Terminal("!")
+    DOT = Terminal(".")
+    MATCH = Terminal("match")
+    EXPORT = Terminal("export")
+    UNDERSCORE = Terminal("_")
+    NEW = Terminal("new")
+    LSQUARE = Terminal("[")
+    RSQUARE = Terminal("]")
 
 
 # -----------------------------------------------------------------------------
 # DORKY LEXER
 # -----------------------------------------------------------------------------
+import bisect
+import dataclasses
+
+
 NUMBER_RE = re.compile("[0-9]+(\\.[0-9]*([eE][-+]?[0-9]+)?)?")
 IDENTIFIER_RE = re.compile("[_A-Za-z][_A-Za-z0-9]*")
 KEYWORD_TABLE = {
-    "_": UNDERSCORE,
-    "and": AND,
-    "as": AS,
-    "class": CLASS,
-    "else": ELSE,
-    "export": EXPORT,
-    "false": FALSE,
-    "for": FOR,
-    "fun": FUN,
-    "if": IF,
-    "import": IMPORT,
-    "in": IN,
-    "is": IS,
-    "let": LET,
-    "match": MATCH,
-    "new": NEW,
-    "or": OR,
-    "return": RETURN,
-    "self": SELF,
-    "true": TRUE,
-    "while": WHILE,
+    "_": FineGrammar.UNDERSCORE,
+    "and": FineGrammar.AND,
+    "as": FineGrammar.AS,
+    "class": FineGrammar.CLASS,
+    "else": FineGrammar.ELSE,
+    "export": FineGrammar.EXPORT,
+    "false": FineGrammar.FALSE,
+    "for": FineGrammar.FOR,
+    "fun": FineGrammar.FUN,
+    "if": FineGrammar.IF,
+    "import": FineGrammar.IMPORT,
+    "in": FineGrammar.IN,
+    "is": FineGrammar.IS,
+    "let": FineGrammar.LET,
+    "match": FineGrammar.MATCH,
+    "new": FineGrammar.NEW,
+    "or": FineGrammar.OR,
+    "return": FineGrammar.RETURN,
+    "self": FineGrammar.SELF,
+    "true": FineGrammar.TRUE,
+    "while": FineGrammar.WHILE,
 }
 
 
@@ -406,63 +419,63 @@ def tokenize(src: str):
         token = None
         if ch == "-":
             if src[pos : pos + 2] == "->":
-                token = (ARROW, pos, 2)
+                token = (FineGrammar.ARROW, pos, 2)
             else:
-                token = (MINUS, pos, 1)
+                token = (FineGrammar.MINUS, pos, 1)
 
         elif ch == "|":
-            token = (BAR, pos, 1)
+            token = (FineGrammar.BAR, pos, 1)
 
         elif ch == ":":
-            token = (COLON, pos, 1)
+            token = (FineGrammar.COLON, pos, 1)
 
         elif ch == "{":
-            token = (LCURLY, pos, 1)
+            token = (FineGrammar.LCURLY, pos, 1)
 
         elif ch == "}":
-            token = (RCURLY, pos, 1)
+            token = (FineGrammar.RCURLY, pos, 1)
 
         elif ch == ";":
-            token = (SEMICOLON, pos, 1)
+            token = (FineGrammar.SEMICOLON, pos, 1)
 
         elif ch == "=":
             if src[pos : pos + 2] == "==":
-                token = (EQUALEQUAL, pos, 2)
+                token = (FineGrammar.EQUALEQUAL, pos, 2)
             else:
-                token = (EQUAL, pos, 1)
+                token = (FineGrammar.EQUAL, pos, 1)
 
         elif ch == "(":
-            token = (LPAREN, pos, 1)
+            token = (FineGrammar.LPAREN, pos, 1)
 
         elif ch == ")":
-            token = (RPAREN, pos, 1)
+            token = (FineGrammar.RPAREN, pos, 1)
 
         elif ch == ",":
-            token = (COMMA, pos, 1)
+            token = (FineGrammar.COMMA, pos, 1)
 
         elif ch == "!":
             if src[pos : pos + 2] == "!=":
-                token = (BANGEQUAL, pos, 2)
+                token = (FineGrammar.BANGEQUAL, pos, 2)
             else:
-                token = (BANG, pos, 1)
+                token = (FineGrammar.BANG, pos, 1)
 
         elif ch == "<":
             if src[pos : pos + 2] == "<=":
-                token = (LESSEQUAL, pos, 2)
+                token = (FineGrammar.LESSEQUAL, pos, 2)
             else:
-                token = (LESS, pos, 1)
+                token = (FineGrammar.LESS, pos, 1)
 
         elif ch == ">":
             if src[pos : pos + 2] == ">=":
-                token = (GREATEREQUAL, pos, 2)
+                token = (FineGrammar.GREATEREQUAL, pos, 2)
             else:
-                token = (GREATER, pos, 1)
+                token = (FineGrammar.GREATER, pos, 1)
 
         elif ch == "+":
-            token = (PLUS, pos, 1)
+            token = (FineGrammar.PLUS, pos, 1)
 
         elif ch == "*":
-            token = (STAR, pos, 1)
+            token = (FineGrammar.STAR, pos, 1)
 
         elif ch == "/":
             if src[pos : pos + 2] == "//":
@@ -470,16 +483,16 @@ def tokenize(src: str):
                     pos = pos + 1
                 continue
 
-            token = (SLASH, pos, 1)
+            token = (FineGrammar.SLASH, pos, 1)
 
         elif ch == ".":
-            token = (DOT, pos, 1)
+            token = (FineGrammar.DOT, pos, 1)
 
         elif ch == "[":
-            token = (LSQUARE, pos, 1)
+            token = (FineGrammar.LSQUARE, pos, 1)
 
         elif ch == "]":
-            token = (RSQUARE, pos, 1)
+            token = (FineGrammar.RSQUARE, pos, 1)
 
         elif ch == '"' or ch == "'":
             end = pos + 1
@@ -490,12 +503,12 @@ def tokenize(src: str):
             if end == len(src):
                 raise Exception(f"Unterminated string constant at {pos}")
             end += 1
-            token = (STRING, pos, end - pos)
+            token = (FineGrammar.STRING, pos, end - pos)
 
         else:
             number_match = NUMBER_RE.match(src, pos)
             if number_match:
-                token = (NUMBER, pos, number_match.end() - pos)
+                token = (FineGrammar.NUMBER, pos, number_match.end() - pos)
             else:
                 id_match = IDENTIFIER_RE.match(src, pos)
                 if id_match:
@@ -504,15 +517,12 @@ def tokenize(src: str):
                     if keyword:
                         token = (keyword, pos, len(fragment))
                     else:
-                        token = (IDENTIFIER, pos, len(fragment))
+                        token = (FineGrammar.IDENTIFIER, pos, len(fragment))
 
         if token is None:
             raise Exception("Token error")
         yield token
         pos += token[2]
-
-
-import bisect
 
 
 class FineTokens:
@@ -546,4 +556,20 @@ class FineTokens:
 
 
 if __name__ == "__main__":
-    FineGrammar().build_table()
+    grammar = FineGrammar()
+    grammar.build_table()
+
+    class LexTest(Grammar):
+        @rule
+        def foo(self):
+            return self.IS
+
+        start = foo
+
+        IS = Terminal("is")
+        AS = Terminal("as")
+        IDENTIFIER = Terminal("[a-z]+", regex=True)
+        # IDENTIFIER = Terminal("[A-Za-z_][A-Za-z0-9_]*", regex=True)
+
+    lexer = compile_lexer(LexTest())
+    dump_lexer_table(lexer)

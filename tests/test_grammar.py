@@ -38,25 +38,27 @@ def _tree(treeform) -> runtime.Tree | runtime.TokenValue:
 def test_lr0_lr0():
     """An LR0 grammar should work with an LR0 generator."""
 
-    PLUS = Terminal("+")
-    LPAREN = Terminal("(")
-    RPAREN = Terminal(")")
-    IDENTIFIER = Terminal("id")
-
-    class LR0Grammar(Grammar):
+    class G(Grammar):
         start = "E"
         generator = parser.GenerateLR0
 
         @rule
         def E(self):
-            return seq(self.E, PLUS, self.T) | self.T
+            return seq(self.E, self.PLUS, self.T) | self.T
 
         @rule
         def T(self):
-            return seq(LPAREN, self.E, RPAREN) | IDENTIFIER
+            return seq(self.LPAREN, self.E, self.RPAREN) | self.IDENTIFIER
 
-    table = LR0Grammar().build_table()
-    tree, errors = runtime.Parser(table).parse(Tokens(IDENTIFIER, PLUS, LPAREN, IDENTIFIER, RPAREN))
+        PLUS = Terminal("+", name="+")
+        LPAREN = Terminal("(", name="(")
+        RPAREN = Terminal(")", name=")")
+        IDENTIFIER = Terminal("id", name="id")
+
+    table = G().build_table()
+    tree, errors = runtime.Parser(table).parse(
+        Tokens(G.IDENTIFIER, G.PLUS, G.LPAREN, G.IDENTIFIER, G.RPAREN)
+    )
 
     assert errors == []
     assert tree == _tree(("E", ("E", ("T", "id")), "+", ("T", "(", ("E", ("T", "id")), ")")))
@@ -65,114 +67,114 @@ def test_lr0_lr0():
 def test_lr0_shift_reduce():
     """This one should not work in LR0- it has a shift/reduce conflict, but works in SLR1."""
 
-    PLUS = Terminal("+")
-    LPAREN = Terminal("(")
-    RPAREN = Terminal(")")
-    LSQUARE = Terminal("[")
-    RSQUARE = Terminal("]")
-    IDENTIFIER = Terminal("id")
-
-    class TestGrammar(Grammar):
+    class G(Grammar):
         start = "E"
         generator = parser.GenerateLR0
 
         @rule
         def E(self):
-            return seq(self.E, PLUS, self.T) | self.T
+            return seq(self.E, self.PLUS, self.T) | self.T
 
         @rule
         def T(self):
             return (
-                seq(LPAREN, self.E, RPAREN) | IDENTIFIER | seq(IDENTIFIER, LSQUARE, self.E, RSQUARE)
+                seq(self.LPAREN, self.E, self.RPAREN)
+                | self.IDENTIFIER
+                | seq(self.IDENTIFIER, self.LSQUARE, self.E, self.RSQUARE)
             )
 
-    with pytest.raises(parser.AmbiguityError):
-        TestGrammar().build_table()
+        PLUS = Terminal("+")
+        LPAREN = Terminal("(")
+        RPAREN = Terminal(")")
+        LSQUARE = Terminal("[")
+        RSQUARE = Terminal("]")
+        IDENTIFIER = Terminal("id")
 
-    TestGrammar().build_table(generator=parser.GenerateSLR1)
+    with pytest.raises(parser.AmbiguityError):
+        G().build_table()
+
+    G().build_table(generator=parser.GenerateSLR1)
 
 
 def test_lr0_reduce_reduce():
     """This one should not work, it has a reduce-reduce conflict."""
 
-    PLUS = Terminal("+")
-    EQUAL = Terminal("=")
-    LPAREN = Terminal("(")
-    RPAREN = Terminal(")")
-    IDENTIFIER = Terminal("id")
-
-    class TestGrammar(Grammar):
+    class G(Grammar):
         start = "E"
         generator = parser.GenerateLR0
 
         @rule
         def E(self):
-            return seq(self.E, PLUS, self.T) | self.T | seq(self.V, EQUAL, self.E)
+            return seq(self.E, self.PLUS, self.T) | self.T | seq(self.V, self.EQUAL, self.E)
 
         @rule
         def T(self):
-            return seq(LPAREN, self.E, RPAREN) | IDENTIFIER
+            return seq(self.LPAREN, self.E, self.RPAREN) | self.IDENTIFIER
 
         @rule
         def V(self):
-            return IDENTIFIER
+            return self.IDENTIFIER
+
+        PLUS = Terminal("+")
+        EQUAL = Terminal("=")
+        LPAREN = Terminal("(")
+        RPAREN = Terminal(")")
+        IDENTIFIER = Terminal("id")
 
     with pytest.raises(parser.AmbiguityError):
-        TestGrammar().build_table()
+        G().build_table()
 
 
 def test_lr0_empty():
     """LR0 can't handle empty productions because it doesn't know when to reduce."""
-    BOOP = Terminal("boop")
-    BEEP = Terminal("beep")
 
-    class TestGrammar(Grammar):
+    class G(Grammar):
         start = "E"
         generator = parser.GenerateLR0
 
         @rule
         def E(self):
-            return seq(self.F, BOOP)
+            return seq(self.F, self.BOOP)
 
         @rule
         def F(self):
-            return BEEP | parser.Nothing
+            return self.BEEP | parser.Nothing
+
+        BOOP = Terminal("boop")
+        BEEP = Terminal("beep")
 
     with pytest.raises(parser.AmbiguityError):
-        TestGrammar().build_table()
+        G().build_table()
 
 
 def test_grammar_aho_ullman_1():
-    EQUAL = Terminal("=")
-    STAR = Terminal("*")
-    ID = Terminal("id")
-
-    class TestGrammar(Grammar):
+    class G(Grammar):
         start = "S"
         generator = parser.GenerateSLR1
 
         @rule
         def S(self):
-            return seq(self.L, EQUAL, self.R) | self.R
+            return seq(self.L, self.EQUAL, self.R) | self.R
 
         @rule
         def L(self):
-            return seq(STAR, self.R) | ID
+            return seq(self.STAR, self.R) | self.ID
 
         @rule
         def R(self):
             return self.L
 
-    with pytest.raises(parser.AmbiguityError):
-        TestGrammar().build_table()
+        EQUAL = Terminal("=")
+        STAR = Terminal("*")
+        ID = Terminal("id")
 
-    TestGrammar().build_table(generator=parser.GenerateLR1)
+    with pytest.raises(parser.AmbiguityError):
+        G().build_table()
+
+    G().build_table(generator=parser.GenerateLR1)
 
 
 def test_grammar_aho_ullman_2():
-    A = Terminal("a")
-    B = Terminal("b")
-
     class TestGrammar(Grammar):
         start = "S"
         generator = parser.GenerateSLR1
@@ -183,7 +185,10 @@ def test_grammar_aho_ullman_2():
 
         @rule
         def X(self):
-            return seq(A, self.X) | B
+            return seq(self.A, self.X) | self.B
+
+        A = Terminal("a")
+        B = Terminal("b")
 
     TestGrammar().build_table()
     TestGrammar().build_table(generator=parser.GenerateLR1)
@@ -191,11 +196,6 @@ def test_grammar_aho_ullman_2():
 
 
 def test_fun_lalr():
-    PLUS = Terminal("+")
-    INT = Terminal("int")
-    ID = Terminal("id")
-    LPAREN = Terminal("(")
-    RPAREN = Terminal(")")
 
     class TestGrammar(Grammar):
         start = "S"
@@ -207,15 +207,21 @@ def test_fun_lalr():
 
         @rule
         def E(self):
-            return self.F | seq(self.E, PLUS, self.F)
+            return self.F | seq(self.E, self.PLUS, self.F)
 
         @rule
         def F(self):
-            return self.V | INT | seq(LPAREN, self.E, RPAREN)
+            return self.V | self.INT | seq(self.LPAREN, self.E, self.RPAREN)
 
         @rule
         def V(self):
-            return ID
+            return self.ID
+
+        PLUS = Terminal("+")
+        INT = Terminal("int")
+        ID = Terminal("id")
+        LPAREN = Terminal("(")
+        RPAREN = Terminal(")")
 
     TestGrammar().build_table()
 
@@ -234,14 +240,14 @@ def test_conflicting_names():
     to understand.
     """
 
-    IDENTIFIER = Terminal("Identifier")
-
     class TestGrammar(Grammar):
-        start = "Identifier"
+        start = "IDENTIFIER"
 
-        @rule("Identifier")
+        @rule("IDENTIFIER")
         def identifier(self):
-            return IDENTIFIER
+            return self.IDENTIFIER
+
+        IDENTIFIER = Terminal("Identifier")
 
     with pytest.raises(ValueError):
         TestGrammar().build_table()
