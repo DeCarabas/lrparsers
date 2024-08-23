@@ -22,6 +22,7 @@ distribution = true
 [tool.pdm.dev-dependencies]
 dev = [
     "pytest>=8.2.2",
+    "hypothesis>=6.111.1",
 ]
 
 [tool.pyright]

@@ -430,3 +430,58 @@ class Parser:
                 error_strings.append(f"{line_index}:{column_index}: {parse_error.message}")
 
         return (result, error_strings)
+
+
+def generic_tokenize(
+    src: str, table: parser.LexerTable
+) -> typing.Iterable[tuple[parser.Terminal, int, int]]:
+    pos = 0
+    state = 0
+    start = 0
+    last_accept = None
+    last_accept_pos = 0
+
+    print(f"LEXING: {src} ({len(src)})")
+
+    while pos < len(src):
+        while state is not None:
+            accept, edges = table[state]
+            if accept is not None:
+                last_accept = accept
+                last_accept_pos = pos
+
+            print(f"    @ {pos} state: {state} ({accept})")
+            if pos >= len(src):
+                break
+
+            char = ord(src[pos])
+            print(f"      -> char: {char} ({repr(src[pos])})")
+
+            # Find the index of the span where the upper value is the tightest
+            # bound on the character.
+            state = None
+            index = bisect.bisect_right(edges, char, key=lambda x: x[0].upper)
+            print(f"      -> {index}")
+            if index < len(edges):
+                span, target = edges[index]
+                print(f"      -> {span}, {target}")
+                if char >= span.lower:
+                    print(f"         -> target: {target}")
+                    state = target
+                    pos += 1
+
+                else:
+                    print(f"         Nope (outside range)")
+            else:
+                print(f"       Nope (at end)")
+
+        if last_accept is None:
+            raise Exception(f"Token error at {pos}")
+
+        yield (last_accept, start, last_accept_pos - start)
+
+        print(f"    Yield: {last_accept}, reset to {last_accept_pos}")
+        last_accept = None
+        pos = last_accept_pos
+        start = pos
+        state = 0

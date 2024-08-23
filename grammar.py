@@ -2,7 +2,17 @@
 import re
 import typing
 
-from parser import Assoc, Grammar, Nothing, rule, seq, Rule, Terminal
+from parser import (
+    Assoc,
+    Grammar,
+    Nothing,
+    rule,
+    seq,
+    Rule,
+    Terminal,
+    Re,
+)
+from parser.parser import compile_lexer, dump_lexer_table
 
 
 class FineGrammar(Grammar):
@@ -321,7 +331,7 @@ class FineGrammar(Grammar):
     def field_value(self) -> Rule:
         return self.IDENTIFIER | seq(self.IDENTIFIER, self.COLON, self.expression)
 
-    BLANK = Terminal("[ \t\r\n]+", regex=True)
+    BLANK = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
 
     ARROW = Terminal("->")
     AS = Terminal("as")
@@ -332,7 +342,12 @@ class FineGrammar(Grammar):
     ELSE = Terminal("else")
     FOR = Terminal("for")
     FUN = Terminal("fun")
-    IDENTIFIER = Terminal("[A-Za-z_][A-Za-z0-9_]*", regex=True)
+    IDENTIFIER = Terminal(
+        Re.seq(
+            Re.set(("a", "z"), ("A", "Z"), "_"),
+            Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
+        )
+    )
     IF = Terminal("if")
     IMPORT = Terminal("import")
     IN = Terminal("in")
@@ -341,7 +356,7 @@ class FineGrammar(Grammar):
     RCURLY = Terminal("}")
     RETURN = Terminal("return")
     SEMICOLON = Terminal(";")
-    STRING = Terminal('""', regex=True)
+    STRING = Terminal('""')  # TODO
     WHILE = Terminal("while")
     EQUAL = Terminal("=")
     LPAREN = Terminal("(")
@@ -361,7 +376,7 @@ class FineGrammar(Grammar):
     MINUS = Terminal("-")
     STAR = Terminal("*")
     SLASH = Terminal("/")
-    NUMBER = Terminal("[0-9]+", regex=True)
+    NUMBER = Terminal(Re.set(("0", "9")).plus())
     TRUE = Terminal("true")
     FALSE = Terminal("false")
     BANG = Terminal("!")
@@ -378,7 +393,6 @@ class FineGrammar(Grammar):
 # DORKY LEXER
 # -----------------------------------------------------------------------------
 import bisect
-import dataclasses
 
 
 NUMBER_RE = re.compile("[0-9]+(\\.[0-9]*([eE][-+]?[0-9]+)?)?")
@@ -559,17 +573,5 @@ if __name__ == "__main__":
     grammar = FineGrammar()
     grammar.build_table()
 
-    class LexTest(Grammar):
-        @rule
-        def foo(self):
-            return self.IS
-
-        start = foo
-
-        IS = Terminal("is")
-        AS = Terminal("as")
-        IDENTIFIER = Terminal("[a-z]+", regex=True)
-        # IDENTIFIER = Terminal("[A-Za-z_][A-Za-z0-9_]*", regex=True)
-
-    lexer = compile_lexer(LexTest())
+    lexer = compile_lexer(grammar)
     dump_lexer_table(lexer)
