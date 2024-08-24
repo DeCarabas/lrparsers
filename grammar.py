@@ -393,12 +393,12 @@ class FineGrammar(Grammar):
             Re.set(("0", "9")).plus(),
             Re.seq(
                 Re.literal("."),
-                Re.set(("0", "9")),
-                Re.seq(
-                    Re.set("e", "E"),
-                    Re.set("+", "-").question(),
-                    Re.set(("0", "9")).plus(),
-                ).question(),
+                Re.set(("0", "9")).plus(),
+            ).question(),
+            Re.seq(
+                Re.set("e", "E"),
+                Re.set("+", "-").question(),
+                Re.set(("0", "9")).plus(),
             ).question(),
         )
     )
