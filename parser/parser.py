@@ -1609,7 +1609,7 @@ class Terminal(Rule):
     value: str | None
     pattern: "str | Re"
 
-    def __init__(self, pattern, name=None):
+    def __init__(self, pattern, *, name=None):
         self.value = name
         self.pattern = pattern
 
