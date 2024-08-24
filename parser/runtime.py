@@ -288,10 +288,13 @@ class Parser:
         self.table = table
 
     def parse(self, tokens: TokenStream) -> typing.Tuple[Tree | None, list[str]]:
+        # TODO: If this were a for reals for reals parser we would keep the trivia
+        #       accessible in the tree.
         input_tokens = tokens.tokens()
         input: list[TokenValue] = [
             TokenValue(kind=kind.value, start=start, end=start + length)
             for (kind, start, length) in input_tokens
+            if kind.value is not None and kind.value not in self.table.trivia
         ]
 
         eof = 0 if len(input) == 0 else input[-1].end

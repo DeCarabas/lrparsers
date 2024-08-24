@@ -18,6 +18,8 @@ class FineGrammar(Grammar):
     # generator = parser.GenerateLR1
     start = "File"
 
+    trivia = ["BLANKS", "COMMENT"]
+
     def __init__(self):
         super().__init__(
             precedence=[
@@ -330,14 +332,14 @@ class FineGrammar(Grammar):
     def field_value(self) -> Rule:
         return self.IDENTIFIER | seq(self.IDENTIFIER, self.COLON, self.expression)
 
-    BLANK = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+    COMMENT = Terminal(Re.seq(Re.literal("//"), Re.set("\n").invert().star()))
 
     ARROW = Terminal("->")
     AS = Terminal("as")
     BAR = Terminal("bar")
     CLASS = Terminal("class")
     COLON = Terminal("colon")
-    COMMENT = Terminal("comment")
     ELSE = Terminal("else")
     FOR = Terminal("for")
     FUN = Terminal("fun")

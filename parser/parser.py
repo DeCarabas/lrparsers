@@ -561,6 +561,7 @@ class ErrorCollection:
 class ParseTable:
     actions: list[dict[str, ParseAction]]
     gotos: list[dict[str, int]]
+    trivia: set[str]
 
     def format(self):
         """Format a parser table so pretty."""
@@ -651,7 +652,7 @@ class TableBuilder(object):
         if error is not None:
             raise error
 
-        return ParseTable(actions=self.actions, gotos=self.gotos)
+        return ParseTable(actions=self.actions, gotos=self.gotos, trivia=set())
 
     def new_row(self, config_set: ConfigSet):
         """Start a new row, processing the given config set. Call this before
@@ -1794,12 +1795,14 @@ class Grammar:
     _start: str
     _generator: type[GenerateLR0]
     _terminals: list[Terminal]
+    _trivia: list[Terminal]
 
     def __init__(
         self,
         start: str | None = None,
         precedence: PrecedenceList | None = None,
         generator: type[GenerateLR0] | None = None,
+        trivia: list[str | Terminal] | None = None,
     ):
         if start is None:
             start = getattr(self, "start", None)
@@ -1817,12 +1820,30 @@ class Grammar:
             generator = getattr(self, "generator", GenerateLALR)
         assert generator is not None
 
+        if trivia is None:
+            trivia = getattr(self, "trivia", [])
+        assert trivia is not None
+
         # Fixup terminal names with the name of the member that declared it.
-        terminals = []
+        terminals = {}
         for n, t in inspect.getmembers(self, lambda x: isinstance(x, Terminal)):
             if t.value is None:
                 t.value = n
-            terminals.append(t)
+
+            if n in terminals:
+                raise ValueError(f"More than one terminal has the name '{n}'")
+            terminals[n] = t
+
+        # Resolve the trivia declarations correctly.
+        resolved_trivia: list[Terminal] = []
+        for t in trivia:
+            if isinstance(t, str):
+                resolved = terminals.get(t)
+                if resolved is None:
+                    raise ValueError(f"The trivia '{t}' is not a terminal name")
+                resolved_trivia.append(resolved)
+            else:
+                resolved_trivia.append(t)
 
         # Fix up the precedence table.
         precedence_table = {}
@@ -1840,11 +1861,16 @@ class Grammar:
         self._precedence = precedence_table
         self._start = start
         self._generator = generator
-        self._terminals = terminals
+        self._terminals = list(terminals.values())
+        self._trivia = resolved_trivia
 
     @property
     def terminals(self) -> list[Terminal]:
         return self._terminals
+
+    @property
+    def resolved_trivia(self) -> list[Terminal]:
+        return self._trivia
 
     def generate_nonterminal_dict(
         self, start: str | None = None
@@ -1919,7 +1945,7 @@ class Grammar:
 
         return grammar, transparents
 
-    def build_table(self, start: str | None = None, generator=None):
+    def build_table(self, start: str | None = None, generator=None) -> ParseTable:
         """Construct a parse table for this grammar, starting at the named
         nonterminal rule.
         """
@@ -1931,6 +1957,11 @@ class Grammar:
             generator = self._generator
         gen = generator(start, desugared, precedence=self._precedence, transparents=transparents)
         table = gen.gen_table()
+
+        for t in self._trivia:
+            assert t.value is not None
+            table.trivia.add(t.value)
+
         return table
 
 
