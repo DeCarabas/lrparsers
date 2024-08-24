@@ -12,7 +12,6 @@ from parser import (
     Terminal,
     Re,
 )
-from parser.parser import compile_lexer, dump_lexer_table
 
 
 class FineGrammar(Grammar):
@@ -356,7 +355,20 @@ class FineGrammar(Grammar):
     RCURLY = Terminal("}")
     RETURN = Terminal("return")
     SEMICOLON = Terminal(";")
-    STRING = Terminal('""')  # TODO
+    STRING = Terminal(
+        # Double-quoted string.
+        Re.seq(
+            Re.literal('"'),
+            (~Re.set('"', "\\") | (Re.set("\\") + Re.any())).star(),
+            Re.literal('"'),
+        )
+        # Single-quoted string.
+        | Re.seq(
+            Re.literal("'"),
+            (~Re.set("'", "\\") | (Re.set("\\") + Re.any())).star(),
+            Re.literal("'"),
+        )
+    )
     WHILE = Terminal("while")
     EQUAL = Terminal("=")
     LPAREN = Terminal("(")
@@ -376,7 +388,20 @@ class FineGrammar(Grammar):
     MINUS = Terminal("-")
     STAR = Terminal("*")
     SLASH = Terminal("/")
-    NUMBER = Terminal(Re.set(("0", "9")).plus())
+    NUMBER = Terminal(
+        Re.seq(
+            Re.set(("0", "9")).plus(),
+            Re.seq(
+                Re.literal("."),
+                Re.set(("0", "9")),
+                Re.seq(
+                    Re.set("e", "E"),
+                    Re.set("+", "-").question(),
+                    Re.set(("0", "9")).plus(),
+                ).question(),
+            ).question(),
+        )
+    )
     TRUE = Terminal("true")
     FALSE = Terminal("false")
     BANG = Terminal("!")
@@ -570,6 +595,8 @@ class FineTokens:
 
 
 if __name__ == "__main__":
+    from parser.parser import compile_lexer, dump_lexer_table
+
     grammar = FineGrammar()
     grammar.build_table()
 
