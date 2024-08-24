@@ -381,3 +381,37 @@ def test_lexer_compile():
         (LexTest.BLANKS, 5, 1),
         (LexTest.IDENTIFIER, 6, 3),
     ]
+
+
+def test_lexer_numbers():
+    class LexTest(Grammar):
+        @rule
+        def number(self):
+            return self.NUMBER
+
+        start = number
+
+        NUMBER = Terminal(
+            Re.seq(
+                Re.set(("0", "9")).plus(),
+                Re.seq(
+                    Re.literal("."),
+                    Re.set(("0", "9")).plus(),
+                    Re.seq(
+                        Re.set("e", "E"),
+                        Re.set("+", "-").question(),
+                        Re.set(("0", "9")).plus(),
+                    ).question(),
+                ).question(),
+            )
+        )
+
+    lexer = compile_lexer(LexTest())
+    dump_lexer_table(lexer)
+
+    number_string = "1234.12"
+
+    tokens = list(generic_tokenize(number_string, lexer))
+    assert tokens == [
+        (LexTest.NUMBER, 0, len(number_string)),
+    ]
