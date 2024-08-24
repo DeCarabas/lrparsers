@@ -2180,36 +2180,46 @@ class Re:
     def seq(cls, *values: "Re") -> "Re":
         result = values[0]
         for v in values[1:]:
-            result = RegexSequence(result, v)
+            result = ReSeq(result, v)
         return result
 
     @classmethod
     def literal(cls, value: str) -> "Re":
-        return cls.seq(*[RegexLiteral.from_ranges(c) for c in value])
+        return cls.seq(*[ReSet.from_ranges(c) for c in value])
 
     @classmethod
-    def set(cls, *args: str | tuple[str, str]) -> "Re":
-        return RegexLiteral.from_ranges(*args)
+    def set(cls, *args: str | tuple[str, str]) -> "ReSet":
+        return ReSet.from_ranges(*args)
+
+    @classmethod
+    def any(cls) -> "ReSet":
+        return ReSet.any()
 
     def plus(self) -> "Re":
-        return RegexPlus(self)
+        return RePlus(self)
 
     def star(self) -> "Re":
-        return RegexStar(self)
+        return ReStar(self)
 
     def question(self) -> "Re":
-        return RegexQuestion(self)
+        return ReQuestion(self)
 
     def __or__(self, value: "Re", /) -> "Re":
-        return RegexAlternation(self, value)
+        return ReAlt(self, value)
+
+    def __add__(self, value: "Re") -> "Re":
+        return ReSeq(self, value)
+
+
+UNICODE_MAX_CP = 1114112
 
 
 @dataclasses.dataclass
-class RegexLiteral(Re):
+class ReSet(Re):
     values: list[Span]
 
     @classmethod
-    def from_ranges(cls, *args: str | tuple[str, str]) -> "RegexLiteral":
+    def from_ranges(cls, *args: str | tuple[str, str]) -> "ReSet":
         values = []
         for a in args:
             if isinstance(a, str):
@@ -2217,7 +2227,36 @@ class RegexLiteral(Re):
             else:
                 values.append(Span.from_str(a[0], a[1]))
 
-        return RegexLiteral(values)
+        return ReSet(values)
+
+    @classmethod
+    def any(cls) -> "ReSet":
+        return ReSet(values=[Span(0, UNICODE_MAX_CP)])
+
+    def invert(self) -> "ReSet":
+        spans = []
+        lower = 0
+        for span in self.values:
+            upper = span.lower
+            if upper != lower:
+                assert lower < upper
+                spans.append(Span(lower, upper))
+            lower = span.upper
+
+        # What... is.... the top end here? Are we dealing with bytes? Are we
+        # dealing with unicode character ranges? In python we're dealing with
+        # "ord". I feel like this... here... is correct but might need to
+        # change when the state machine is converted for other languages.
+        #
+        upper = UNICODE_MAX_CP
+        if upper != lower:
+            assert lower < upper
+            spans.append(Span(lower, upper))
+
+        return ReSet(spans)
+
+    def __invert__(self) -> "ReSet":
+        return self.invert()
 
     def to_nfa(self, start: NFAState) -> NFAState:
         end = NFAState()
@@ -2243,7 +2282,7 @@ class RegexLiteral(Re):
 
 
 @dataclasses.dataclass
-class RegexPlus(Re):
+class RePlus(Re):
     child: Re
 
     def to_nfa(self, start: NFAState) -> NFAState:
@@ -2256,7 +2295,7 @@ class RegexPlus(Re):
 
 
 @dataclasses.dataclass
-class RegexStar(Re):
+class ReStar(Re):
     child: Re
 
     def to_nfa(self, start: NFAState) -> NFAState:
@@ -2270,7 +2309,7 @@ class RegexStar(Re):
 
 
 @dataclasses.dataclass
-class RegexQuestion(Re):
+class ReQuestion(Re):
     child: Re
 
     def to_nfa(self, start: NFAState) -> NFAState:
@@ -2283,7 +2322,7 @@ class RegexQuestion(Re):
 
 
 @dataclasses.dataclass
-class RegexSequence(Re):
+class ReSeq(Re):
     left: Re
     right: Re
 
@@ -2296,7 +2335,7 @@ class RegexSequence(Re):
 
 
 @dataclasses.dataclass
-class RegexAlternation(Re):
+class ReAlt(Re):
     left: Re
     right: Re
 
