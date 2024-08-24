@@ -1,9 +1,8 @@
 import collections
 
 from hypothesis import assume, example, given
-from hypothesis.strategies import integers, lists, tuples
+from hypothesis.strategies import integers, lists
 
-import pytest
 
 from parser import (
     EdgeList,
