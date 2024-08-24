@@ -1,7 +1,8 @@
 import collections
+import math
 
 from hypothesis import assume, example, given
-from hypothesis.strategies import integers, lists
+from hypothesis.strategies import integers, lists, floats
 
 
 from parser import (
@@ -383,7 +384,10 @@ def test_lexer_compile():
     ]
 
 
-def test_lexer_numbers():
+@given(floats().map(abs))
+def test_lexer_numbers(n: float):
+    assume(math.isfinite(n))
+
     class LexTest(Grammar):
         @rule
         def number(self):
@@ -397,11 +401,11 @@ def test_lexer_numbers():
                 Re.seq(
                     Re.literal("."),
                     Re.set(("0", "9")).plus(),
-                    Re.seq(
-                        Re.set("e", "E"),
-                        Re.set("+", "-").question(),
-                        Re.set(("0", "9")).plus(),
-                    ).question(),
+                ).question(),
+                Re.seq(
+                    Re.set("e", "E"),
+                    Re.set("+", "-").question(),
+                    Re.set(("0", "9")).plus(),
                 ).question(),
             )
         )
@@ -409,7 +413,7 @@ def test_lexer_numbers():
     lexer = compile_lexer(LexTest())
     dump_lexer_table(lexer)
 
-    number_string = "1234.12"
+    number_string = str(n)
 
     tokens = list(generic_tokenize(number_string, lexer))
     assert tokens == [

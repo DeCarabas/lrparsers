@@ -441,7 +441,7 @@ def generic_tokenize(
     last_accept = None
     last_accept_pos = 0
 
-    print(f"LEXING: {src} ({len(src)})")
+    # print(f"LEXING: {src} ({len(src)})")
 
     while pos < len(src):
         while state is not None:
@@ -450,37 +450,39 @@ def generic_tokenize(
                 last_accept = accept
                 last_accept_pos = pos
 
-            print(f"    @ {pos} state: {state} ({accept})")
+            # print(f"    @ {pos} state: {state} ({accept})")
             if pos >= len(src):
                 break
 
             char = ord(src[pos])
-            print(f"      -> char: {char} ({repr(src[pos])})")
+            # print(f"      -> char: {char} ({repr(src[pos])})")
 
             # Find the index of the span where the upper value is the tightest
             # bound on the character.
             state = None
             index = bisect.bisect_right(edges, char, key=lambda x: x[0].upper)
-            print(f"      -> {index}")
+            # print(f"      -> {index}")
             if index < len(edges):
                 span, target = edges[index]
-                print(f"      -> {span}, {target}")
+                # print(f"      -> {span}, {target}")
                 if char >= span.lower:
-                    print(f"         -> target: {target}")
+                    # print(f"         -> target: {target}")
                     state = target
                     pos += 1
 
                 else:
-                    print(f"         Nope (outside range)")
+                    # print(f"         Nope (outside range)")
+                    pass
             else:
-                print(f"       Nope (at end)")
+                # print(f"       Nope (at end)")
+                pass
 
         if last_accept is None:
             raise Exception(f"Token error at {pos}")
 
         yield (last_accept, start, last_accept_pos - start)
 
-        print(f"    Yield: {last_accept}, reset to {last_accept_pos}")
+        # print(f"    Yield: {last_accept}, reset to {last_accept_pos}")
         last_accept = None
         pos = last_accept_pos
         start = pos
