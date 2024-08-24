@@ -249,3 +249,118 @@ def test_conflicting_names():
 
     with pytest.raises(ValueError):
         TestGrammar().build_table()
+
+
+def test_grammar_ignore_trivia():
+    class G(Grammar):
+        start = "sentence"
+
+        trivia = ["BLANK"]
+
+        @rule
+        def sentence(self):
+            return self.WORD | seq(self.sentence, self.WORD)
+
+        WORD = Terminal("blah")
+        BLANK = Terminal(" ")
+
+    table = G().build_table()
+    assert "BLANK" in table.trivia
+
+    tree, errors = runtime.Parser(table).parse(
+        Tokens(
+            G.WORD,
+            G.BLANK,
+            G.WORD,
+            G.BLANK,
+        )
+    )
+
+    assert errors == []
+    assert tree == _tree(("sentence", ("sentence", "WORD"), "WORD"))
+
+
+def test_grammar_unknown_trivia():
+    class G(Grammar):
+        start = "sentence"
+
+        trivia = ["BLANK"]
+
+        @rule
+        def sentence(self):
+            return self.WORD | seq(self.sentence, self.WORD)
+
+        WORD = Terminal("blah")
+
+    with pytest.raises(ValueError):
+        G().build_table()
+
+
+def test_grammar_trivia_symbol():
+    class G(Grammar):
+        start = "sentence"
+
+        @rule
+        def sentence(self):
+            return self.WORD | seq(self.sentence, self.WORD)
+
+        WORD = Terminal("blah")
+        BLANK = Terminal(" ")
+
+        trivia = [BLANK]
+
+    table = G().build_table()
+    assert "BLANK" in table.trivia
+
+
+def test_grammar_trivia_constructor():
+    class G(Grammar):
+        start = "sentence"
+
+        def __init__(self):
+            super().__init__(trivia=[self.BLANK])
+
+        @rule
+        def sentence(self):
+            return self.WORD | seq(self.sentence, self.WORD)
+
+        WORD = Terminal("blah")
+        BLANK = Terminal(" ")
+
+    table = G().build_table()
+    assert "BLANK" in table.trivia
+
+
+def test_grammar_trivia_constructor_string():
+    class G(Grammar):
+        start = "sentence"
+
+        def __init__(self):
+            super().__init__(trivia=["BLANK"])
+
+        @rule
+        def sentence(self):
+            return self.WORD | seq(self.sentence, self.WORD)
+
+        WORD = Terminal("blah")
+        BLANK = Terminal(" ")
+
+    table = G().build_table()
+    assert "BLANK" in table.trivia
+
+
+def test_grammar_trivia_constructor_string_unknown():
+    class G(Grammar):
+        start = "sentence"
+
+        def __init__(self):
+            super().__init__(trivia=["BLANK"])
+
+        @rule
+        def sentence(self):
+            return self.WORD | seq(self.sentence, self.WORD)
+
+        WORD = Terminal("blah")
+
+    with pytest.raises(ValueError):
+        G().build_table()
