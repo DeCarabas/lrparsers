@@ -23,19 +23,20 @@ To get started, create a grammar that derives from the `Grammar` class. Create
 one method per nonterminal, decorated with the `rule` decorator. Here's an
 example:
 
-    PLUS = Token('+')
-    LPAREN = Token('(')
-    RPAREN = Token(')')
-    ID = Token('id')
 
     class SimpleGrammar(Grammar):
         @rule
         def expression(self):
-            return seq(self.expression, PLUS, self.term) | self.term
+            return seq(self.expression, self.PLUS, self.term) | self.term
 
         @rule
         def term(self):
-            return seq(LPAREN, self.expression, RPAREN) | ID
+            return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
+
+        PLUS = Terminal('+')
+        LPAREN = Terminal('(')
+        RPAREN = Terminal(')')
+        ID = Terminal('id')
 
 
 ## Using grammars
