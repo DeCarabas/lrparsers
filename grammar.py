@@ -349,7 +349,7 @@ class FineGrammar(Grammar):
     IN = Terminal("in", kind=TerminalKind.Keyword.Operator)
     LCURLY = Terminal("{", kind=TerminalKind.Punctuation.CurlyBrace.Open)
     RCURLY = Terminal("}", kind=TerminalKind.Punctuation.CurlyBrace.Close)
-    LET = Terminal("Let", kind=TerminalKind.Keyword.Other)
+    LET = Terminal("let", kind=TerminalKind.Keyword.Other)
     RETURN = Terminal("return", kind=TerminalKind.Keyword.Control)
     SEMICOLON = Terminal(";", kind=TerminalKind.Punctuation.Separator)
     STRING = Terminal(
