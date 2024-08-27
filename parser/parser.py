@@ -2149,15 +2149,15 @@ class EdgeList[ET]:
 
 
 class NFAState:
-    """An NFA state. Each state can be the accept state, with one or more
-    Terminals as the result."""
+    """An NFA state. A state can be an accept state if it has a Terminal
+    associated with it."""
 
-    accept: list[Terminal]
+    accept: Terminal | None
     epsilons: list["NFAState"]
     _edges: EdgeList["NFAState"]
 
     def __init__(self):
-        self.accept = []
+        self.accept = None
         self.epsilons = []
         self._edges = EdgeList()
 
@@ -2183,7 +2183,7 @@ class NFAState:
                     continue
                 visited.add(state)
 
-                label = ", ".join([t.value for t in state.accept if t.value is not None])
+                label = state.accept.value if state.accept is not None else ""
                 f.write(f'  {id(state)} [label="{label}"];\n')
                 for target in state.epsilons:
                     stack.append(target)
@@ -2460,42 +2460,42 @@ class NFASuperState:
 
     def accept_terminal(self) -> Terminal | None:
         accept = None
-        for st in self.states:
-            for ac in st.accept:
-                if accept is None:
-                    accept = ac
-                elif accept.value != ac.value:
-                    accept_regex = isinstance(accept.pattern, Re)
-                    ac_regex = isinstance(ac.pattern, Re)
 
-                    if accept_regex and not ac_regex:
-                        accept = ac
-                    elif ac_regex and not accept_regex:
-                        pass
-                    else:
-                        raise ValueError(
-                            f"Lexer is ambiguous: cannot distinguish between {accept.value} ('{accept.pattern}') and {ac.value} ('{ac.pattern}')"
-                        )
+        for st in self.states:
+            if st.accept is None:
+                continue
+
+            if accept is None:
+                accept = st.accept
+            elif accept.value != st.accept.value:
+                if accept.regex and not st.accept.regex:
+                    accept = st.accept
+                elif st.accept.regex and not accept.regex:
+                    pass
+                else:
+                    raise ValueError(
+                        f"Lexer is ambiguous: cannot distinguish between {accept.value} ('{accept.pattern}') and {st.accept.value} ('{st.accept.pattern}')"
+                    )
 
         return accept
 
 
-def compile_terminals(terminals: typing.Iterable[Terminal]) -> LexerTable:
+def compile_lexer(grammar: Grammar) -> LexerTable:
     # Parse the terminals all together into a big NFA rooted at `NFA`.
     NFA = NFAState()
-    for terminal in terminals:
+    for terminal in grammar.terminals:
         pattern = terminal.pattern
         if isinstance(pattern, Re):
             start, ends = pattern.to_nfa()
             for end in ends:
-                end.accept.append(terminal)
+                end.accept = terminal
             NFA.epsilons.append(start)
 
         else:
             start = end = NFAState()
             for c in pattern:
                 end = end.add_edge(Span.from_str(c), NFAState())
-            end.accept.append(terminal)
+            end.accept = terminal
             NFA.epsilons.append(start)
 
     NFA.dump_graph()
@@ -2525,12 +2525,8 @@ def compile_terminals(terminals: typing.Iterable[Terminal]) -> LexerTable:
     ]
 
 
-def compile_lexer(grammar: Grammar) -> LexerTable:
-    return compile_terminals(grammar.terminals)
-
-
-def dump_lexer_table(table: LexerTable):
-    with open("lexer.dot", "w", encoding="utf-8") as f:
+def dump_lexer_table(table: LexerTable, name: str = "lexer.dot"):
+    with open(name, "w", encoding="utf-8") as f:
         f.write("digraph G {\n")
         for index, (accept, edges) in enumerate(table):
             label = accept.value if accept is not None else ""
