@@ -23,11 +23,6 @@ from parser import runtime
 
 
 ###############################################################################
-# Parsing Stuff
-###############################################################################
-
-
-###############################################################################
 # Screen Stuff
 ###############################################################################
 
@@ -84,13 +79,18 @@ def goto_cursor(x: int, y: int):
 # Dynamic Modules: Detect and Reload Modules when they Change
 ###############################################################################
 
+VERSION = 0
 
-class DynamicModule:
+MT = typing.TypeVar("MT")
+
+
+class DynamicModule[MT]:
     file_name: str
     member_name: str | None
 
     last_time: float | None
     module: types.ModuleType | None
+    value: MT | None
 
     def __init__(self, file_name, member_name):
         self.file_name = file_name
@@ -110,14 +110,17 @@ class DynamicModule:
 
         return True
 
-    def _transform(self, value):
+    def _transform(self, value) -> MT:
         return value
 
-    def get(self):
+    def get(self) -> MT:
         st = os.stat(self.file_name)
         if self.last_time == st.st_mtime:
             assert self.value is not None
             return self.value
+
+        global VERSION
+        VERSION += 1
 
         self.value = None
 
@@ -150,7 +153,7 @@ class DynamicModule:
         return self.value
 
 
-class DynamicGrammarModule(DynamicModule):
+class DynamicGrammarModule(DynamicModule[parser.ParseTable]):
     def __init__(self, file_name, member_name, start_rule):
         super().__init__(file_name, member_name)
 
@@ -169,15 +172,23 @@ class DynamicGrammarModule(DynamicModule):
         return value().build_table(start=self.start_rule)
 
 
-class DynamicLexerModule(DynamicModule):
+class DynamicLexerModule(DynamicModule[typing.Callable[[str], runtime.TokenStream]]):
     def _predicate(self, member) -> bool:
         if not super()._predicate(member):
             return False
 
-        if getattr(member, "tokens", None):
+        if getattr(member, "terminals", None):
             return True
 
         return False
+
+    def _transform(self, value):
+        lexer_table = parser.compile_lexer(value())
+
+        def get_tokens(src: str) -> runtime.TokenStream:
+            return runtime.GenericTokenStream(src, lexer_table)
+
+        return get_tokens
 
 
 class DisplayMode(enum.Enum):
@@ -220,6 +231,8 @@ class Harness:
     line_start: int
     last_cols: int
 
+    last_version: int
+
     def __init__(
         self, grammar_file, grammar_member, lexer_file, lexer_member, start_rule, source_path
     ):
@@ -230,9 +243,12 @@ class Harness:
         self.start_rule = start_rule
         self.source_path = source_path
 
+        self.last_version = -1
+
         self.mode = DisplayMode.TREE
 
         self.source = None
+
         self.table = None
         self.tokens = None
         self.tree = None
@@ -250,7 +266,7 @@ class Harness:
             self.grammar_file, self.grammar_member, self.start_rule
         )
 
-        self.lexer_module = DynamicLexerModule(self.lexer_file, self.lexer_member)
+        self.lexer_module = DynamicLexerModule(self.lexer_file, self.grammar_member)
 
         self.log_handler = ListHandler()
         logging.basicConfig(level=logging.INFO, handlers=[self.log_handler])
@@ -286,15 +302,25 @@ class Harness:
         return self.grammar_module.get()
 
     def update(self):
-        self.log_handler.clear()
+        global VERSION
+
         start_time = time.time()
         try:
             table = self.load_grammar()
             lexer_func = self.lexer_module.get()
 
             with open(self.source_path, "r", encoding="utf-8") as f:
-                self.source = f.read()
+                source = f.read()
+                if source != self.source:
+                    VERSION += 1
+                    self.source = source
 
+            if VERSION == self.last_version:
+                return  # Just stop, do nothing, it's all the same.
+            self.last_version = VERSION
+            assert self.source is not None
+
+            self.log_handler.clear()
             self.tokens = lexer_func(self.source)
             lex_time = time.time()
 
@@ -320,6 +346,33 @@ class Harness:
             self.state_count = 0
             self.average_entries = 0
             self.max_entries = 0
+
+        # WHAT
+        try:
+            with open("tree.txt", "w", encoding="utf-8") as f:
+                lines = []
+                if self.tree is not None:
+                    self.format_node(lines, self.tree)
+                f.writelines([f"{l}\n" for l in lines])
+        except Exception as e:
+            self.errors.extend([f"Unable to write tree.txt: {e}"])
+
+        try:
+            with open("errors.txt", "w", encoding="utf-8") as f:
+                f.writelines([f"{l}\n" for l in self.errors])
+        except Exception as e:
+            self.errors.extend([f"Unable to write errors.txt: {e}"])
+
+        try:
+            with open("parse.log", "w", encoding="utf-8") as f:
+                f.writelines([f"{l}\n" for l in self.log_handler.logs])
+        except Exception as e:
+            self.errors.extend([f"Unable to write parse.log: {e}"])
+
+        if hasattr(self.tokens, "dump"):
+            lines = self.tokens.dump()
+            with open("tokens.txt", "w", encoding="utf-8") as f:
+                f.writelines([f"{l}\n" for l in lines])
 
     def render(self):
         sys.stdout.buffer.write(CLEAR)
