@@ -1,7 +1,7 @@
 import bisect
 import enum
-import enum
 import logging
+import re
 import typing
 from dataclasses import dataclass
 
@@ -490,3 +490,55 @@ def generic_tokenize(
         pos = last_accept_pos
         start = pos
         state = 0
+
+
+class GenericTokenStream:
+    def __init__(self, src: str, lexer: parser.LexerTable):
+        self.src = src
+        self.lexer = lexer
+        self._tokens: list[typing.Tuple[parser.Terminal, int, int]] = list(
+            generic_tokenize(src, lexer)
+        )
+        self._lines = [m.start() for m in re.finditer("\n", src)]
+
+    def tokens(self):
+        return self._tokens
+
+    def lines(self):
+        return self._lines
+
+    def dump(self, *, start=None, end=None) -> list[str]:
+        if start is None:
+            start = 0
+        if end is None:
+            end = len(self._tokens)
+
+        max_terminal_name = max(
+            len(terminal.value)
+            for terminal, _ in self.lexer
+            if terminal is not None and terminal.value is not None
+        )
+        max_offset_len = len(str(len(self.src)))
+
+        prev_line = None
+        lines = []
+        for token in self._tokens[start:end]:
+            (kind, start, length) = token
+            line_index = bisect.bisect_left(self._lines, start)
+            if line_index == 0:
+                col_start = 0
+            else:
+                col_start = self._lines[line_index - 1] + 1
+            column_index = start - col_start
+            value = self.src[start : start + length]
+
+            line_number = line_index + 1
+            if line_number != prev_line:
+                line_part = f"{line_number:4}"
+                prev_line = line_number
+            else:
+                line_part = "   |"
+
+            line = f"{start:{max_offset_len}} {line_part} {column_index:3} {kind.value:{max_terminal_name}} {repr(value)}"
+            lines.append(line)
+        return lines
