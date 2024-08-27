@@ -2,16 +2,7 @@
 import re
 import typing
 
-from parser import (
-    Assoc,
-    Grammar,
-    Nothing,
-    rule,
-    seq,
-    Rule,
-    Terminal,
-    Re,
-)
+from parser import Assoc, Grammar, Nothing, rule, seq, Rule, Terminal, Re, TerminalKind
 
 
 class FineGrammar(Grammar):
@@ -333,30 +324,34 @@ class FineGrammar(Grammar):
         return self.IDENTIFIER | seq(self.IDENTIFIER, self.COLON, self.expression)
 
     BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
-    COMMENT = Terminal(Re.seq(Re.literal("//"), Re.set("\n").invert().star()))
+    COMMENT = Terminal(
+        Re.seq(Re.literal("//"), Re.set("\n").invert().star()),
+        kind=TerminalKind.Comment.Line,
+    )
 
-    ARROW = Terminal("->")
-    AS = Terminal("as")
-    BAR = Terminal("bar")
-    CLASS = Terminal("class")
-    COLON = Terminal("colon")
-    ELSE = Terminal("else")
-    FOR = Terminal("for")
-    FUN = Terminal("fun")
+    ARROW = Terminal("->", kind=TerminalKind.Keyword.Operator)
+    AS = Terminal("as", kind=TerminalKind.Keyword.Operator.Expression)
+    BAR = Terminal("|", kind=TerminalKind.Keyword.Operator.Expression)
+    CLASS = Terminal("class", kind=TerminalKind.Storage.Type.Class)
+    COLON = Terminal(":", kind=TerminalKind.Punctuation.Separator)
+    ELSE = Terminal("else", kind=TerminalKind.Keyword.Control.Conditional)
+    FOR = Terminal("for", kind=TerminalKind.Keyword.Control)
+    FUN = Terminal("fun", kind=TerminalKind.Storage.Type.Function)
     IDENTIFIER = Terminal(
         Re.seq(
             Re.set(("a", "z"), ("A", "Z"), "_"),
             Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
-        )
+        ),
+        # kind=TerminalKind.Variable, #?
     )
-    IF = Terminal("if")
-    IMPORT = Terminal("import")
-    IN = Terminal("in")
-    LCURLY = Terminal("{")
-    LET = Terminal("Let")
-    RCURLY = Terminal("}")
-    RETURN = Terminal("return")
-    SEMICOLON = Terminal(";")
+    IF = Terminal("if", kind=TerminalKind.Keyword.Control.Conditional)
+    IMPORT = Terminal("import", kind=TerminalKind.Keyword.Other)
+    IN = Terminal("in", kind=TerminalKind.Keyword.Operator)
+    LCURLY = Terminal("{", kind=TerminalKind.Punctuation.CurlyBrace.Open)
+    RCURLY = Terminal("}", kind=TerminalKind.Punctuation.CurlyBrace.Close)
+    LET = Terminal("Let", kind=TerminalKind.Keyword.Other)
+    RETURN = Terminal("return", kind=TerminalKind.Keyword.Control)
+    SEMICOLON = Terminal(";", kind=TerminalKind.Punctuation.Separator)
     STRING = Terminal(
         # Double-quoted string.
         Re.seq(
@@ -369,27 +364,28 @@ class FineGrammar(Grammar):
             Re.literal("'"),
             (~Re.set("'", "\\") | (Re.set("\\") + Re.any())).star(),
             Re.literal("'"),
-        )
+        ),
+        kind=TerminalKind.String.Quoted,
     )
-    WHILE = Terminal("while")
-    EQUAL = Terminal("=")
-    LPAREN = Terminal("(")
-    RPAREN = Terminal(")")
-    COMMA = Terminal(",")
-    SELF = Terminal("self", name="SELFF")
-    OR = Terminal("or")
-    IS = Terminal("is")
-    AND = Terminal("and")
-    EQUALEQUAL = Terminal("==")
-    BANGEQUAL = Terminal("!=")
-    LESS = Terminal("<")
-    GREATER = Terminal(">")
-    LESSEQUAL = Terminal("<=")
-    GREATEREQUAL = Terminal(">=")
-    PLUS = Terminal("+")
-    MINUS = Terminal("-")
-    STAR = Terminal("*")
-    SLASH = Terminal("/")
+    WHILE = Terminal("while", kind=TerminalKind.Keyword.Control)
+    EQUAL = Terminal("=", kind=TerminalKind.Keyword.Operator.Expression)
+    LPAREN = Terminal("(", kind=TerminalKind.Punctuation.Parenthesis.Open)
+    RPAREN = Terminal(")", kind=TerminalKind.Punctuation.Parenthesis.Close)
+    COMMA = Terminal(",", kind=TerminalKind.Punctuation.Separator)
+    SELF = Terminal("self", name="SELFF", kind=TerminalKind.Variable.Language)
+    OR = Terminal("or", kind=TerminalKind.Keyword.Operator.Expression)
+    IS = Terminal("is", kind=TerminalKind.Keyword.Operator.Expression)
+    AND = Terminal("and", kind=TerminalKind.Keyword.Operator.Expression)
+    EQUALEQUAL = Terminal("==", kind=TerminalKind.Keyword.Operator.Expression)
+    BANGEQUAL = Terminal("!=", kind=TerminalKind.Keyword.Operator.Expression)
+    LESS = Terminal("<", kind=TerminalKind.Keyword.Operator.Expression)
+    GREATER = Terminal(">", kind=TerminalKind.Keyword.Operator.Expression)
+    LESSEQUAL = Terminal("<=", kind=TerminalKind.Keyword.Operator.Expression)
+    GREATEREQUAL = Terminal(">=", kind=TerminalKind.Keyword.Operator.Expression)
+    PLUS = Terminal("+", kind=TerminalKind.Keyword.Operator.Expression)
+    MINUS = Terminal("-", kind=TerminalKind.Keyword.Operator.Expression)
+    STAR = Terminal("*", kind=TerminalKind.Keyword.Operator.Expression)
+    SLASH = Terminal("/", kind=TerminalKind.Keyword.Operator.Expression)
     NUMBER = Terminal(
         Re.seq(
             Re.set(("0", "9")).plus(),
@@ -402,18 +398,19 @@ class FineGrammar(Grammar):
                 Re.set("+", "-").question(),
                 Re.set(("0", "9")).plus(),
             ).question(),
-        )
+        ),
+        kind=TerminalKind.Constant.Numeric,
     )
-    TRUE = Terminal("true")
-    FALSE = Terminal("false")
-    BANG = Terminal("!")
-    DOT = Terminal(".")
-    MATCH = Terminal("match")
-    EXPORT = Terminal("export")
-    UNDERSCORE = Terminal("_")
-    NEW = Terminal("new")
-    LSQUARE = Terminal("[")
-    RSQUARE = Terminal("]")
+    TRUE = Terminal("true", kind=TerminalKind.Constant.Language)
+    FALSE = Terminal("false", kind=TerminalKind.Constant.Language)
+    BANG = Terminal("!", kind=TerminalKind.Keyword.Operator.Expression)
+    DOT = Terminal(".", kind=TerminalKind.Punctuation.Separator)
+    MATCH = Terminal("match", kind=TerminalKind.Keyword.Other)
+    EXPORT = Terminal("export", kind=TerminalKind.Keyword.Other)
+    UNDERSCORE = Terminal("_", kind=TerminalKind.Variable.Language)
+    NEW = Terminal("new", kind=TerminalKind.Keyword.Operator)
+    LSQUARE = Terminal("[", kind=TerminalKind.Punctuation.SquareBracket.Open)
+    RSQUARE = Terminal("]", kind=TerminalKind.Punctuation.SquareBracket.Close)
 
 
 # -----------------------------------------------------------------------------

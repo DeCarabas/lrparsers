@@ -1609,10 +1609,14 @@ class Terminal(Rule):
 
     value: str | None
     pattern: "str | Re"
+    meta: dict[str, typing.Any]
+    regex: bool
 
-    def __init__(self, pattern, *, name=None):
+    def __init__(self, pattern: "str|Re", *, name: str | None = None, **kwargs):
         self.value = name
         self.pattern = pattern
+        self.meta = kwargs
+        self.regex = isinstance(pattern, Re)
 
     def flatten(self) -> typing.Generator[list["str | Terminal"], None, None]:
         # We are just ourselves when flattened.
@@ -2537,3 +2541,91 @@ def dump_lexer_table(table: LexerTable, name: str = "lexer.dot"):
 
             pass
         f.write("}\n")
+
+
+# NOTE: We have rich metadata system man, wow, how cool are we?
+#
+#       The whole point of this stuff here is to allow automatic
+#       generation/maintenance of syntax coloring for editors. And maybe some
+#       other stuff? This is *extremely provisional*, I'm not even sure it
+#       makes sense yet. Tree sitter works differently, for example, and it's
+#       not clear at all what we want to generate for any particular editor.
+#
+#       This here might be enough to produce extremely basic TextMate
+#       grammars but anything more complicated will want tree patterns
+#       anyway, and we can only do tree patterns by influencing the grammar.
+class TerminalMeta:
+    pass
+
+
+class TerminalKind(TerminalMeta):
+    class Comment(TerminalMeta):
+        class Block(TerminalMeta):
+            pass
+
+        class Line(TerminalMeta):
+            pass
+
+    class Constant(TerminalMeta):
+        class Language(TerminalMeta):
+            pass
+
+        class Numeric(TerminalMeta):
+            pass
+
+    class Keyword(TerminalMeta):
+        class Control(TerminalMeta):
+            class Conditional(TerminalMeta):
+                pass
+
+        class Operator(TerminalMeta):
+            class Expression(TerminalMeta):
+                pass
+
+        class Other(TerminalMeta):
+            pass
+
+    class Punctuation(TerminalMeta):
+        class Separator(TerminalMeta):
+            pass
+
+        class Parenthesis(TerminalMeta):
+            class Open(TerminalMeta):
+                pass
+
+            class Close(TerminalMeta):
+                pass
+
+        class CurlyBrace(TerminalMeta):
+            class Open(TerminalMeta):
+                pass
+
+            class Close(TerminalMeta):
+                pass
+
+        class SquareBracket(TerminalMeta):
+            class Open(TerminalMeta):
+                pass
+
+            class Close(TerminalMeta):
+                pass
+
+    class Storage(TerminalMeta):
+        class Type(TerminalMeta):
+            class Class(TerminalMeta):
+                pass
+
+            class Function(TerminalMeta):
+                pass
+
+    class String(TerminalMeta):
+        class Quoted(TerminalMeta):
+            class Single(TerminalMeta):
+                pass
+
+            class Double(TerminalMeta):
+                pass
+
+    class Variable(TerminalMeta):
+        class Language(TerminalMeta):
+            pass
