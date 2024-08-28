@@ -135,10 +135,11 @@ class FineGrammar(Grammar):
     # Block
     @rule("Block")
     def block(self) -> Rule:
-        return seq(
-            self.LCURLY,
-            opt(opt(self._statement_list), self.expression)
-            self.RCURLY,
+        return (
+            seq(self.LCURLY, self.RCURLY)
+            | seq(self.LCURLY, self.expression, self.RCURLY)
+            | seq(self.LCURLY, self._statement_list, self.RCURLY)
+            | seq(self.LCURLY, self._statement_list, self.expression, self.RCURLY)
         )
 
     @rule
