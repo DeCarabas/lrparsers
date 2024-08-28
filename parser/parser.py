@@ -1715,19 +1715,6 @@ class NothingRule(Rule):
 Nothing = NothingRule()
 
 
-class OptionalRule(Rule):
-    """A rule that matches if one or another rule matches."""
-
-    def __init__(self, rule: Rule):
-        self.rule = rule
-
-    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
-        # All the things from the left of the alternative, then all the things
-        # from the right, never intermingled.
-        yield from self.rule.flatten()
-        yield from Nothing.flatten()
-
-
 def seq(*args: Rule) -> Rule:
     """A rule that matches a sequence of rules.
 
@@ -1740,13 +1727,20 @@ def seq(*args: Rule) -> Rule:
 
 
 def opt(*args: Rule) -> Rule:
-    return OptionalRule(seq(*args))
+    return AlternativeRule(seq(*args), Nothing)
+
+
+class MetadataRule(Rule):
+    def __init__(self, rule: Rule, metadata: dict[str, typing.Any]):
+        self.rule = rule
+        self.metadata = metadata
+
+    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
+        yield from self.rule.flatten()
 
 
 def mark(rule: Rule, **kwargs) -> Rule:
-    # TODO: Figure out how to incorporate this into the world.
-    del kwargs
-    return rule
+    return MetadataRule(rule, kwargs)
 
 
 @typing.overload
