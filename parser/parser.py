@@ -1715,6 +1715,19 @@ class NothingRule(Rule):
 Nothing = NothingRule()
 
 
+class OptionalRule(Rule):
+    """A rule that matches if one or another rule matches."""
+
+    def __init__(self, rule: Rule):
+        self.rule = rule
+
+    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
+        # All the things from the left of the alternative, then all the things
+        # from the right, never intermingled.
+        yield from self.rule.flatten()
+        yield from Nothing.flatten()
+
+
 def seq(*args: Rule) -> Rule:
     """A rule that matches a sequence of rules.
 
@@ -1724,6 +1737,16 @@ def seq(*args: Rule) -> Rule:
     for rule in args[1:]:
         result = SequenceRule(result, rule)
     return result
+
+
+def opt(*args: Rule) -> Rule:
+    return OptionalRule(seq(*args))
+
+
+def mark(rule: Rule, **kwargs) -> Rule:
+    # TODO: Figure out how to incorporate this into the world.
+    del kwargs
+    return rule
 
 
 @typing.overload
@@ -2554,78 +2577,86 @@ def dump_lexer_table(table: LexerTable, name: str = "lexer.dot"):
 #       This here might be enough to produce extremely basic TextMate
 #       grammars but anything more complicated will want tree patterns
 #       anyway, and we can only do tree patterns by influencing the grammar.
-class TerminalMeta:
+class SyntaxMeta:
     pass
 
 
-class TerminalKind(TerminalMeta):
-    class Comment(TerminalMeta):
-        class Block(TerminalMeta):
+class Highlight(SyntaxMeta):
+    class Comment(SyntaxMeta):
+        class Block(SyntaxMeta):
             pass
 
-        class Line(TerminalMeta):
+        class Line(SyntaxMeta):
             pass
 
-    class Constant(TerminalMeta):
-        class Language(TerminalMeta):
+    class Constant(SyntaxMeta):
+        class Language(SyntaxMeta):
             pass
 
-        class Numeric(TerminalMeta):
+        class Numeric(SyntaxMeta):
             pass
 
-    class Keyword(TerminalMeta):
-        class Control(TerminalMeta):
-            class Conditional(TerminalMeta):
+    class Entity(SyntaxMeta):
+        class Name(SyntaxMeta):
+            class Function(SyntaxMeta):
                 pass
 
-        class Operator(TerminalMeta):
-            class Expression(TerminalMeta):
+            class Type(SyntaxMeta):
                 pass
 
-        class Other(TerminalMeta):
+    class Keyword(SyntaxMeta):
+        class Control(SyntaxMeta):
+            class Conditional(SyntaxMeta):
+                pass
+
+        class Operator(SyntaxMeta):
+            class Expression(SyntaxMeta):
+                pass
+
+        class Other(SyntaxMeta):
             pass
 
-    class Punctuation(TerminalMeta):
-        class Separator(TerminalMeta):
+    class Punctuation(SyntaxMeta):
+        class Separator(SyntaxMeta):
             pass
 
-        class Parenthesis(TerminalMeta):
-            class Open(TerminalMeta):
+        class Parenthesis(SyntaxMeta):
+            class Open(SyntaxMeta):
                 pass
 
-            class Close(TerminalMeta):
+            class Close(SyntaxMeta):
                 pass
 
-        class CurlyBrace(TerminalMeta):
-            class Open(TerminalMeta):
+        class CurlyBrace(SyntaxMeta):
+            class Open(SyntaxMeta):
                 pass
 
-            class Close(TerminalMeta):
+            class Close(SyntaxMeta):
                 pass
 
-        class SquareBracket(TerminalMeta):
-            class Open(TerminalMeta):
+        class SquareBracket(SyntaxMeta):
+            class Open(SyntaxMeta):
                 pass
 
-            class Close(TerminalMeta):
+            class Close(SyntaxMeta):
                 pass
 
-    class Storage(TerminalMeta):
-        class Type(TerminalMeta):
-            class Class(TerminalMeta):
+    class Storage(SyntaxMeta):
+        class Type(SyntaxMeta):
+            class Class(SyntaxMeta):
                 pass
 
-            class Function(TerminalMeta):
+            class Function(SyntaxMeta):
                 pass
 
-    class String(TerminalMeta):
-        class Quoted(TerminalMeta):
-            class Single(TerminalMeta):
+    class String(SyntaxMeta):
+        class Quoted(SyntaxMeta):
+            class Single(SyntaxMeta):
                 pass
 
-            class Double(TerminalMeta):
+            class Double(SyntaxMeta):
                 pass
 
-    class Variable(TerminalMeta):
-        class Language(TerminalMeta):
+    class Variable(SyntaxMeta):
+        class Language(SyntaxMeta):
             pass

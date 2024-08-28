@@ -1,8 +1,5 @@
 # This is an example grammar.
-import re
-import typing
-
-from parser import Assoc, Grammar, Nothing, rule, seq, Rule, Terminal, Re, TerminalKind
+from parser import Assoc, Grammar, Nothing, rule, seq, Rule, Terminal, Re, Highlight, mark, opt
 
 
 class FineGrammar(Grammar):
@@ -53,7 +50,11 @@ class FineGrammar(Grammar):
 
     @rule("ClassDeclaration")
     def class_declaration(self) -> Rule:
-        return seq(self.CLASS, self.IDENTIFIER, self._class_body)
+        return seq(
+            self.CLASS,
+            mark(self.IDENTIFIER, highlight=Highlight.Entity.Name.Type),
+            self._class_body,
+        )
 
     @rule
     def _class_body(self) -> Rule:
@@ -100,21 +101,23 @@ class FineGrammar(Grammar):
     # Functions
     @rule("FunctionDecl")
     def function_declaration(self) -> Rule:
-        return seq(self.FUN, self.IDENTIFIER, self.function_parameters, self.block) | seq(
+        return seq(
             self.FUN,
-            self.IDENTIFIER,
+            mark(self.IDENTIFIER, highlight=Highlight.Entity.Name.Function),
             self.function_parameters,
-            self.ARROW,
-            self.type_expression,
+            opt(self.ARROW, self.type_expression),
             self.block,
         )
 
     @rule("ParamList")
     def function_parameters(self) -> Rule:
-        return (
-            seq(self.LPAREN, self.RPAREN)
-            | seq(self.LPAREN, self._first_parameter, self.RPAREN)
-            | seq(self.LPAREN, self._first_parameter, self.COMMA, self._parameter_list, self.RPAREN)
+        return seq(
+            self.LPAREN,
+            opt(
+                self._first_parameter,
+                opt(self.COMMA, self._parameter_list),
+            ),
+            self.RPAREN,
         )
 
     @rule
@@ -132,11 +135,10 @@ class FineGrammar(Grammar):
     # Block
     @rule("Block")
     def block(self) -> Rule:
-        return (
-            seq(self.LCURLY, self.RCURLY)
-            | seq(self.LCURLY, self.expression, self.RCURLY)
-            | seq(self.LCURLY, self._statement_list, self.RCURLY)
-            | seq(self.LCURLY, self._statement_list, self.expression, self.RCURLY)
+        return seq(
+            self.LCURLY,
+            opt(opt(self._statement_list), self.expression)
+            self.RCURLY,
         )
 
     @rule
@@ -326,32 +328,32 @@ class FineGrammar(Grammar):
     BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
     COMMENT = Terminal(
         Re.seq(Re.literal("//"), Re.set("\n").invert().star()),
-        kind=TerminalKind.Comment.Line,
+        highlight=Highlight.Comment.Line,
     )
 
-    ARROW = Terminal("->", kind=TerminalKind.Keyword.Operator)
-    AS = Terminal("as", kind=TerminalKind.Keyword.Operator.Expression)
-    BAR = Terminal("|", kind=TerminalKind.Keyword.Operator.Expression)
-    CLASS = Terminal("class", kind=TerminalKind.Storage.Type.Class)
-    COLON = Terminal(":", kind=TerminalKind.Punctuation.Separator)
-    ELSE = Terminal("else", kind=TerminalKind.Keyword.Control.Conditional)
-    FOR = Terminal("for", kind=TerminalKind.Keyword.Control)
-    FUN = Terminal("fun", kind=TerminalKind.Storage.Type.Function)
+    ARROW = Terminal("->", highlight=Highlight.Keyword.Operator)
+    AS = Terminal("as", highlight=Highlight.Keyword.Operator.Expression)
+    BAR = Terminal("|", highlight=Highlight.Keyword.Operator.Expression)
+    CLASS = Terminal("class", highlight=Highlight.Storage.Type.Class)
+    COLON = Terminal(":", highlight=Highlight.Punctuation.Separator)
+    ELSE = Terminal("else", highlight=Highlight.Keyword.Control.Conditional)
+    FOR = Terminal("for", highlight=Highlight.Keyword.Control)
+    FUN = Terminal("fun", highlight=Highlight.Storage.Type.Function)
     IDENTIFIER = Terminal(
         Re.seq(
             Re.set(("a", "z"), ("A", "Z"), "_"),
             Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
         ),
-        # kind=TerminalKind.Variable, #?
+        # highlight=Highlight.Variable, #?
     )
-    IF = Terminal("if", kind=TerminalKind.Keyword.Control.Conditional)
-    IMPORT = Terminal("import", kind=TerminalKind.Keyword.Other)
-    IN = Terminal("in", kind=TerminalKind.Keyword.Operator)
-    LCURLY = Terminal("{", kind=TerminalKind.Punctuation.CurlyBrace.Open)
-    RCURLY = Terminal("}", kind=TerminalKind.Punctuation.CurlyBrace.Close)
-    LET = Terminal("let", kind=TerminalKind.Keyword.Other)
-    RETURN = Terminal("return", kind=TerminalKind.Keyword.Control)
-    SEMICOLON = Terminal(";", kind=TerminalKind.Punctuation.Separator)
+    IF = Terminal("if", highlight=Highlight.Keyword.Control.Conditional)
+    IMPORT = Terminal("import", highlight=Highlight.Keyword.Other)
+    IN = Terminal("in", highlight=Highlight.Keyword.Operator)
+    LCURLY = Terminal("{", highlight=Highlight.Punctuation.CurlyBrace.Open)
+    RCURLY = Terminal("}", highlight=Highlight.Punctuation.CurlyBrace.Close)
+    LET = Terminal("let", highlight=Highlight.Keyword.Other)
+    RETURN = Terminal("return", highlight=Highlight.Keyword.Control)
+    SEMICOLON = Terminal(";", highlight=Highlight.Punctuation.Separator)
     STRING = Terminal(
         # Double-quoted string.
         Re.seq(
@@ -365,27 +367,27 @@ class FineGrammar(Grammar):
             (~Re.set("'", "\\") | (Re.set("\\") + Re.any())).star(),
             Re.literal("'"),
         ),
-        kind=TerminalKind.String.Quoted,
+        highlight=Highlight.String.Quoted,
     )
-    WHILE = Terminal("while", kind=TerminalKind.Keyword.Control)
-    EQUAL = Terminal("=", kind=TerminalKind.Keyword.Operator.Expression)
-    LPAREN = Terminal("(", kind=TerminalKind.Punctuation.Parenthesis.Open)
-    RPAREN = Terminal(")", kind=TerminalKind.Punctuation.Parenthesis.Close)
-    COMMA = Terminal(",", kind=TerminalKind.Punctuation.Separator)
-    SELF = Terminal("self", name="SELFF", kind=TerminalKind.Variable.Language)
-    OR = Terminal("or", kind=TerminalKind.Keyword.Operator.Expression)
-    IS = Terminal("is", kind=TerminalKind.Keyword.Operator.Expression)
-    AND = Terminal("and", kind=TerminalKind.Keyword.Operator.Expression)
-    EQUALEQUAL = Terminal("==", kind=TerminalKind.Keyword.Operator.Expression)
-    BANGEQUAL = Terminal("!=", kind=TerminalKind.Keyword.Operator.Expression)
-    LESS = Terminal("<", kind=TerminalKind.Keyword.Operator.Expression)
-    GREATER = Terminal(">", kind=TerminalKind.Keyword.Operator.Expression)
-    LESSEQUAL = Terminal("<=", kind=TerminalKind.Keyword.Operator.Expression)
-    GREATEREQUAL = Terminal(">=", kind=TerminalKind.Keyword.Operator.Expression)
-    PLUS = Terminal("+", kind=TerminalKind.Keyword.Operator.Expression)
-    MINUS = Terminal("-", kind=TerminalKind.Keyword.Operator.Expression)
-    STAR = Terminal("*", kind=TerminalKind.Keyword.Operator.Expression)
-    SLASH = Terminal("/", kind=TerminalKind.Keyword.Operator.Expression)
+    WHILE = Terminal("while", highlight=Highlight.Keyword.Control)
+    EQUAL = Terminal("=", highlight=Highlight.Keyword.Operator.Expression)
+    LPAREN = Terminal("(", highlight=Highlight.Punctuation.Parenthesis.Open)
+    RPAREN = Terminal(")", highlight=Highlight.Punctuation.Parenthesis.Close)
+    COMMA = Terminal(",", highlight=Highlight.Punctuation.Separator)
+    SELF = Terminal("self", name="SELFF", highlight=Highlight.Variable.Language)
+    OR = Terminal("or", highlight=Highlight.Keyword.Operator.Expression)
+    IS = Terminal("is", highlight=Highlight.Keyword.Operator.Expression)
+    AND = Terminal("and", highlight=Highlight.Keyword.Operator.Expression)
+    EQUALEQUAL = Terminal("==", highlight=Highlight.Keyword.Operator.Expression)
+    BANGEQUAL = Terminal("!=", highlight=Highlight.Keyword.Operator.Expression)
+    LESS = Terminal("<", highlight=Highlight.Keyword.Operator.Expression)
+    GREATER = Terminal(">", highlight=Highlight.Keyword.Operator.Expression)
+    LESSEQUAL = Terminal("<=", highlight=Highlight.Keyword.Operator.Expression)
+    GREATEREQUAL = Terminal(">=", highlight=Highlight.Keyword.Operator.Expression)
+    PLUS = Terminal("+", highlight=Highlight.Keyword.Operator.Expression)
+    MINUS = Terminal("-", highlight=Highlight.Keyword.Operator.Expression)
+    STAR = Terminal("*", highlight=Highlight.Keyword.Operator.Expression)
+    SLASH = Terminal("/", highlight=Highlight.Keyword.Operator.Expression)
     NUMBER = Terminal(
         Re.seq(
             Re.set(("0", "9")).plus(),
@@ -399,18 +401,18 @@ class FineGrammar(Grammar):
                 Re.set(("0", "9")).plus(),
             ).question(),
         ),
-        kind=TerminalKind.Constant.Numeric,
+        highlight=Highlight.Constant.Numeric,
     )
-    TRUE = Terminal("true", kind=TerminalKind.Constant.Language)
-    FALSE = Terminal("false", kind=TerminalKind.Constant.Language)
-    BANG = Terminal("!", kind=TerminalKind.Keyword.Operator.Expression)
-    DOT = Terminal(".", kind=TerminalKind.Punctuation.Separator)
-    MATCH = Terminal("match", kind=TerminalKind.Keyword.Other)
-    EXPORT = Terminal("export", kind=TerminalKind.Keyword.Other)
-    UNDERSCORE = Terminal("_", kind=TerminalKind.Variable.Language)
-    NEW = Terminal("new", kind=TerminalKind.Keyword.Operator)
-    LSQUARE = Terminal("[", kind=TerminalKind.Punctuation.SquareBracket.Open)
-    RSQUARE = Terminal("]", kind=TerminalKind.Punctuation.SquareBracket.Close)
+    TRUE = Terminal("true", highlight=Highlight.Constant.Language)
+    FALSE = Terminal("false", highlight=Highlight.Constant.Language)
+    BANG = Terminal("!", highlight=Highlight.Keyword.Operator.Expression)
+    DOT = Terminal(".", highlight=Highlight.Punctuation.Separator)
+    MATCH = Terminal("match", highlight=Highlight.Keyword.Other)
+    EXPORT = Terminal("export", highlight=Highlight.Keyword.Other)
+    UNDERSCORE = Terminal("_", highlight=Highlight.Variable.Language)
+    NEW = Terminal("new", highlight=Highlight.Keyword.Operator)
+    LSQUARE = Terminal("[", highlight=Highlight.Punctuation.SquareBracket.Open)
+    RSQUARE = Terminal("]", highlight=Highlight.Punctuation.SquareBracket.Close)
 
 
 if __name__ == "__main__":
