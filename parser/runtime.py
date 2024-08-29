@@ -292,9 +292,9 @@ class Parser:
         #       accessible in the tree.
         input_tokens = tokens.tokens()
         input: list[TokenValue] = [
-            TokenValue(kind=kind.value, start=start, end=start + length)
+            TokenValue(kind=kind.name, start=start, end=start + length)
             for (kind, start, length) in input_tokens
-            if kind.value is not None and kind.value not in self.table.trivia
+            if kind.name is not None and kind.name not in self.table.trivia
         ]
 
         eof = 0 if len(input) == 0 else input[-1].end
@@ -514,9 +514,9 @@ class GenericTokenStream:
             end = len(self._tokens)
 
         max_terminal_name = max(
-            len(terminal.value)
+            len(terminal.name)
             for terminal, _ in self.lexer
-            if terminal is not None and terminal.value is not None
+            if terminal is not None and terminal.name is not None
         )
         max_offset_len = len(str(len(self.src)))
 
@@ -539,6 +539,6 @@ class GenericTokenStream:
             else:
                 line_part = "   |"
 
-            line = f"{start:{max_offset_len}} {line_part} {column_index:3} {kind.value:{max_terminal_name}} {repr(value)}"
+            line = f"{start:{max_offset_len}} {line_part} {column_index:3} {kind.name:{max_terminal_name}} {repr(value)}"
             lines.append(line)
         return lines

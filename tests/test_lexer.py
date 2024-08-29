@@ -11,7 +11,6 @@ from parser import (
     Grammar,
     rule,
     Terminal,
-    compile_lexer,
     dump_lexer_table,
     Re,
 )
@@ -372,7 +371,7 @@ def test_lexer_compile():
         )
         BLANKS = Terminal(Re.set("\r", "\n", "\t", " ").plus())
 
-    lexer = compile_lexer(LexTest())
+    lexer = LexTest().compile_lexer()
     dump_lexer_table(lexer)
     tokens = list(generic_tokenize("xy is ass", lexer))
     assert tokens == [
@@ -410,7 +409,7 @@ def test_lexer_numbers(n: float):
             )
         )
 
-    lexer = compile_lexer(LexTest())
+    lexer = LexTest().compile_lexer()
     dump_lexer_table(lexer)
 
     number_string = str(n)
