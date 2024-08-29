@@ -1813,7 +1813,6 @@ class Grammar:
     """
 
     _precedence: dict[str, typing.Tuple[Assoc, int]]
-    _start: str
     _generator: type[GenerateLR0]
     _terminals: list[Terminal]
     _trivia: list[Terminal]
@@ -1886,7 +1885,7 @@ class Grammar:
             name = self.__class__.__name__.removesuffix("Grammar").lower()
 
         self._precedence = precedence_table
-        self._start = start
+        self.start = start
         self._generator = generator
         self._terminals = list(terminals.values())
         self._trivia = resolved_trivia
@@ -1900,6 +1899,9 @@ class Grammar:
     def resolved_trivia(self) -> list[Terminal]:
         return self._trivia
 
+    def rules(self) -> list[Rule]:
+        return list(inspect.getmembers(self, lambda x: isinstance(x, Rule)))
+
     def generate_nonterminal_dict(
         self, start: str | None = None
     ) -> typing.Tuple[dict[str, list[list[str | Terminal]]], set[str]]:
@@ -1912,7 +1914,7 @@ class Grammar:
         productions.
         """
         if start is None:
-            start = self._start
+            start = self.start
 
         rules = inspect.getmembers(self, lambda x: isinstance(x, NonTerminal))
         nonterminals = {rule.name: rule for _, rule in rules}
@@ -1978,7 +1980,7 @@ class Grammar:
         nonterminal rule.
         """
         if start is None:
-            start = self._start
+            start = self.start
         desugared, transparents = self.desugar(start)
 
         if generator is None:
