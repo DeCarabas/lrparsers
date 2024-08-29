@@ -2544,9 +2544,9 @@ class Grammar:
         if start is None:
             start = self.start
 
-        rules = inspect.getmembers(self, lambda x: isinstance(x, NonTerminal))
-        nonterminals = {rule.name: rule for _, rule in rules}
-        transparents = {rule.name for _, rule in rules if rule.transparent}
+        rules = self.non_terminals()
+        nonterminals = {rule.name: rule for rule in rules}
+        transparents = {rule.name for rule in rules if rule.transparent}
 
         grammar = {}
 
