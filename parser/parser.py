@@ -1824,6 +1824,7 @@ class Grammar:
         precedence: PrecedenceList | None = None,
         generator: type[GenerateLR0] | None = None,
         trivia: list[str | Terminal] | None = None,
+        name: str | None = None,
     ):
         if start is None:
             start = getattr(self, "start", None)
@@ -1879,11 +1880,17 @@ class Grammar:
 
                 precedence_table[key] = (associativity, prec + 1)
 
+        if name is None:
+            name = getattr(self, "name", None)
+        if name is None:
+            name = self.__class__.__name__.removesuffix("Grammar").lower()
+
         self._precedence = precedence_table
         self._start = start
         self._generator = generator
         self._terminals = list(terminals.values())
         self._trivia = resolved_trivia
+        self.name = name
 
     @property
     def terminals(self) -> list[Terminal]:

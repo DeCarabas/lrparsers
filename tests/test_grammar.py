@@ -364,3 +364,49 @@ def test_grammar_trivia_constructor_string_unknown():
 
     with pytest.raises(ValueError):
         G().build_table()
+
+
+def test_grammar_name_implicit():
+    class FooGrammar(Grammar):
+        start = "x"
+
+        @rule
+        def x(self):
+            return self.WORD
+
+        WORD = Terminal("blah")
+
+    assert FooGrammar().name == "foo"
+
+
+def test_grammar_name_explicit_member():
+    class FooGrammar(Grammar):
+        start = "x"
+
+        name = "bar"
+
+        @rule
+        def x(self):
+            return self.WORD
+
+        WORD = Terminal("blah")
+
+    assert FooGrammar().name == "bar"
+
+
+def test_grammar_name_explicit_constructor():
+    class FooGrammar(Grammar):
+        start = "x"
+
+        name = "bar"
+
+        def __init__(self):
+            super().__init__(name="baz")
+
+        @rule
+        def x(self):
+            return self.WORD
+
+        WORD = Terminal("blah")
+
+    assert FooGrammar().name == "baz"
