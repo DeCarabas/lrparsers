@@ -1623,7 +1623,7 @@ class Terminal(Rule):
         yield [self]
 
     def __repr__(self) -> str:
-        return self.name or "???"
+        return self.name or "<Unknown terminal>"
 
 
 class NonTerminal(Rule):
@@ -2064,6 +2064,7 @@ UNICODE_MAX_CP = 1114112
 @dataclasses.dataclass
 class ReSet(Re):
     values: list[Span]
+    inversion: bool = False  # No semantic meaning, just pretty.
 
     @classmethod
     def from_ranges(cls, *args: str | tuple[str, str]) -> "ReSet":
@@ -2100,7 +2101,7 @@ class ReSet(Re):
             assert lower < upper
             spans.append(Span(lower, upper))
 
-        return ReSet(spans)
+        return ReSet(spans, inversion=not self.inversion)
 
     def __invert__(self) -> "ReSet":
         return self.invert()
