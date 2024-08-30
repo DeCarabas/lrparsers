@@ -417,10 +417,14 @@ class FineGrammar(Grammar):
 
 
 if __name__ == "__main__":
-    from parser.parser import compile_lexer, dump_lexer_table
+    from pathlib import Path
+    from parser.parser import dump_lexer_table
+    from parser.tree_sitter import emit_tree_sitter_grammar
 
     grammar = FineGrammar()
     grammar.build_table()
 
-    lexer = compile_lexer(grammar)
+    lexer = grammar.compile_lexer()
     dump_lexer_table(lexer)
+
+    emit_tree_sitter_grammar(grammar, Path(__file__).parent / "tree-sitter-fine")

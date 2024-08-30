@@ -136,7 +136,7 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
         if len(final) > 1:
             result = f"choice({result})"
         if has_nothing:
-            result = f"opt({result})"
+            result = f"optional({result})"
         return result
 
     elif isinstance(rule, parser.SequenceRule):
@@ -162,7 +162,10 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
         return result
 
     elif isinstance(rule, parser.NonTerminal):
-        return f"$['{rule.name}']"
+        target_name = rule.name
+        if rule.transparent:
+            target_name = f"_{target_name}"
+        return f"$['{target_name}']"
 
     elif isinstance(rule, parser.MetadataRule):
         return convert_to_tree_sitter(rule.rule, grammar)
