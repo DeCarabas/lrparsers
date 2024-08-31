@@ -2524,12 +2524,11 @@ class Grammar:
     def terminals(self) -> list[Terminal]:
         return self._terminals
 
-    @property
-    def resolved_trivia(self) -> list[Terminal]:
-        return self._trivia
-
     def non_terminals(self) -> list[NonTerminal]:
         return [nt for _, nt in inspect.getmembers(self, lambda x: isinstance(x, NonTerminal))]
+
+    def get_precedence(self, name: str) -> None | tuple[Assoc, int]:
+        return self._precedence.get(name)
 
     def generate_nonterminal_dict(
         self, start: str | None = None

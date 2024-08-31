@@ -1,5 +1,5 @@
 # This is an example grammar.
-from parser import Assoc, Grammar, Nothing, rule, seq, Rule, Terminal, Re, Highlight, mark, opt
+from parser import Assoc, Grammar, rule, seq, Rule, Terminal, Re, Highlight, mark, opt
 
 
 class FineGrammar(Grammar):
@@ -96,7 +96,11 @@ class FineGrammar(Grammar):
 
     @rule
     def export_list(self) -> Rule:
-        return Nothing | self.IDENTIFIER | seq(self.IDENTIFIER, self.COMMA, self.export_list)
+        return (
+            self.IDENTIFIER
+            | seq(self.IDENTIFIER, self.COMMA)
+            | seq(self.IDENTIFIER, self.COMMA, self.export_list)
+        )
 
     # Functions
     @rule("FunctionDecl")
@@ -114,8 +118,9 @@ class FineGrammar(Grammar):
         return seq(
             self.LPAREN,
             opt(
-                self._first_parameter,
-                opt(self.COMMA, self._parameter_list),
+                self._first_parameter
+                | seq(self._first_parameter, self.COMMA)
+                | seq(self._first_parameter, self.COMMA, self._parameter_list)
             ),
             self.RPAREN,
         )
@@ -126,7 +131,7 @@ class FineGrammar(Grammar):
 
     @rule
     def _parameter_list(self) -> Rule:
-        return Nothing | self.parameter | seq(self.parameter, self.COMMA, self._parameter_list)
+        return self.parameter | seq(self.parameter, self.COMMA, self._parameter_list)
 
     @rule("Parameter")
     def parameter(self) -> Rule:

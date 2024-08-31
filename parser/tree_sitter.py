@@ -99,9 +99,21 @@ def to_javascript_regex(re: parser.Re) -> str:
     raise Exception(f"Regex node {re} not supported for tree-sitter")
 
 
-def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
-    # TODO: Precedence?
+def apply_precedence(js: str, name: str, grammar: parser.Grammar) -> str:
+    prec = grammar.get_precedence(name)
+    if prec is not None:
+        assoc, level = prec
+        if assoc == parser.Assoc.LEFT:
+            js = f"prec.left({level}, {js})"
+        elif assoc == parser.Assoc.RIGHT:
+            js = f"prec.right({level}, {js})"
+        else:
+            js = f"prec({level}, {js})"
 
+    return js
+
+
+def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
     method = getattr(rule, "convert_to_tree_sitter", None)
     if method is not None:
         return method(grammar)
@@ -109,10 +121,14 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
     if isinstance(rule, parser.Terminal):
         if isinstance(rule.pattern, parser.Re):
             regex = to_javascript_regex(rule.pattern)
-            return f"/{regex}/"
+            result = f"/{regex}/"
         else:
             string = to_js_string(rule.pattern)
-            return f'"{string}"'
+            result = f'"{string}"'
+
+        if rule.name is not None:
+            result = apply_precedence(result, rule.name, grammar)
+        return result
 
     elif isinstance(rule, parser.AlternativeRule):
         final = []
@@ -176,7 +192,6 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
 
 # https://tree-sitter.github.io/tree-sitter/creating-parsers
 def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
-    # TODO: PRECEDENCE
     path = pathlib.Path(path) / "grammar.js"
     with open(path, "w", encoding="utf-8") as f:
         f.write('/// <reference types="tree-sitter-cli/dsl" />\n')
@@ -195,6 +210,8 @@ def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
 
             body = rule.fn(grammar)
             rule_definition = convert_to_tree_sitter(body, grammar)
+            rule_definition = apply_precedence(rule_definition, rule.name, grammar)
+
             f.write(f"    '{rule_name}': $ => {rule_definition},")
 
         f.write("  }\n")
