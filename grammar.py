@@ -290,14 +290,10 @@ class FineGrammar(Grammar):
     @rule("Pattern")
     def pattern(self) -> Rule:
         return (
-            seq(self.variable_binding, self._pattern_core, self._pattern_predicate)
+            seq(self.variable_binding, self._pattern_core, self.AND, self.expression)
             | seq(self.variable_binding, self._pattern_core)
             | self._pattern_core
         )
-
-    @rule
-    def _pattern_predicate(self) -> Rule:
-        return seq(self.AND, self.expression)
 
     @rule
     def _pattern_core(self) -> Rule:

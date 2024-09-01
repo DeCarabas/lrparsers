@@ -126,8 +126,6 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
             string = to_js_string(rule.pattern)
             result = f'"{string}"'
 
-        if rule.name is not None:
-            result = apply_precedence(result, rule.name, grammar)
         return result
 
     elif isinstance(rule, parser.AlternativeRule):
@@ -172,9 +170,32 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
         if len(final) == 0:
             raise Exception("Unsupported rule: empty sequence")
 
-        result = ", ".join([convert_to_tree_sitter(r, grammar) for r in final])
-        if len(final) > 1:
-            result = f"seq({result})"
+        # OK so there's a weird thing here? If we see a terminal in our
+        # sequence that has a precedence then we need to group with the
+        # previous element somehow.
+        #
+        # This is an incredible comment that explains how tree-sitter
+        # actually thinks about conflicts:
+        #
+        #   https://github.com/tree-sitter/tree-sitter/issues/372
+        #
+        pieces = [convert_to_tree_sitter(r, grammar) for r in final]
+
+        def make_seq(pieces: list[str]):
+            if len(pieces) == 1:
+                return pieces[0]
+
+            return "seq({})".format(", ".join(pieces))
+
+        for i, r in reversed(list(enumerate(final))):
+            if isinstance(r, parser.Terminal) and r.name is not None:
+                if grammar.get_precedence(r.name) is not None:
+                    cut = max(i - 1, 0)
+                    js = make_seq(pieces[cut:])
+                    js = apply_precedence(js, r.name, grammar)
+                    pieces = pieces[:cut] + [js]
+
+        result = make_seq(pieces)
         return result
 
     elif isinstance(rule, parser.NonTerminal):
