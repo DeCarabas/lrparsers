@@ -1,5 +1,5 @@
 # This is an example grammar.
-from parser import Assoc, Grammar, rule, seq, Rule, Terminal, Re, Highlight, mark, opt
+from parser import alt, Assoc, Grammar, rule, seq, Rule, Terminal, Re, Highlight, mark, opt
 
 
 class FineGrammar(Grammar):
@@ -198,20 +198,20 @@ class FineGrammar(Grammar):
 
     @rule("BinaryExpression")
     def binary_expression(self) -> Rule:
-        return (
-            seq(self.expression, self.EQUAL, self.expression)
-            | seq(self.expression, self.OR, self.expression)
-            | seq(self.expression, self.AND, self.expression)
-            | seq(self.expression, self.EQUALEQUAL, self.expression)
-            | seq(self.expression, self.BANGEQUAL, self.expression)
-            | seq(self.expression, self.LESS, self.expression)
-            | seq(self.expression, self.LESSEQUAL, self.expression)
-            | seq(self.expression, self.GREATER, self.expression)
-            | seq(self.expression, self.GREATEREQUAL, self.expression)
-            | seq(self.expression, self.PLUS, self.expression)
-            | seq(self.expression, self.MINUS, self.expression)
-            | seq(self.expression, self.STAR, self.expression)
-            | seq(self.expression, self.SLASH, self.expression)
+        return alt(
+            self.expression + self.EQUAL + self.expression,
+            self.expression + self.OR + self.expression,
+            self.expression + self.AND + self.expression,
+            self.expression + self.EQUALEQUAL + self.expression,
+            self.expression + self.BANGEQUAL + self.expression,
+            self.expression + self.LESS + self.expression,
+            self.expression + self.LESSEQUAL + self.expression,
+            self.expression + self.GREATER + self.expression,
+            self.expression + self.GREATEREQUAL + self.expression,
+            self.expression + self.PLUS + self.expression,
+            self.expression + self.MINUS + self.expression,
+            self.expression + self.STAR + self.expression,
+            self.expression + self.SLASH + self.expression,
         )
 
     @rule("IsExpression")

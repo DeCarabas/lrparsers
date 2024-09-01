@@ -1715,6 +1715,17 @@ class NothingRule(Rule):
 Nothing = NothingRule()
 
 
+def alt(*args: Rule) -> Rule:
+    """A rule that matches one of a series of alternatives.
+
+    (A helper function that combines its arguments into nested alternatives.)
+    """
+    result = args[0]
+    for rule in args[1:]:
+        result = AlternativeRule(result, rule)
+    return result
+
+
 def seq(*args: Rule) -> Rule:
     """A rule that matches a sequence of rules.
 
