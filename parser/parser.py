@@ -2334,90 +2334,284 @@ def dump_lexer_table(table: LexerTable, name: str = "lexer.dot"):
 #       This here might be enough to produce extremely basic TextMate
 #       grammars but anything more complicated will want tree patterns
 #       anyway, and we can only do tree patterns by influencing the grammar.
+#
+#       Here's the info on textmate grammars:
+#           https://macromates.com/manual/en/language_grammars
 class SyntaxMeta:
     pass
 
 
-class Highlight(SyntaxMeta):
-    class Comment(SyntaxMeta):
-        class Block(SyntaxMeta):
-            pass
+class HighlightMeta(SyntaxMeta):
+    scope: str
 
-        class Line(SyntaxMeta):
-            pass
+    def __init__(self, *scope: str):
+        self.scope = ".".join(scope)
 
-    class Constant(SyntaxMeta):
-        class Language(SyntaxMeta):
-            pass
 
-        class Numeric(SyntaxMeta):
-            pass
+class CommentHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("comment", *scope)
 
-    class Entity(SyntaxMeta):
-        class Name(SyntaxMeta):
-            class Function(SyntaxMeta):
-                pass
 
-            class Type(SyntaxMeta):
-                pass
+class BlockCommentHighlight(CommentHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("block", *scope)
 
-    class Keyword(SyntaxMeta):
-        class Control(SyntaxMeta):
-            class Conditional(SyntaxMeta):
-                pass
 
-        class Operator(SyntaxMeta):
-            class Expression(SyntaxMeta):
-                pass
+class LineCommentHighlight(CommentHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("line", *scope)
 
-        class Other(SyntaxMeta):
-            pass
 
-    class Punctuation(SyntaxMeta):
-        class Separator(SyntaxMeta):
-            pass
+class ConstantHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("constant", *scope)
 
-        class Parenthesis(SyntaxMeta):
-            class Open(SyntaxMeta):
-                pass
 
-            class Close(SyntaxMeta):
-                pass
+class LanguageConstantHighlight(ConstantHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("language", *scope)
 
-        class CurlyBrace(SyntaxMeta):
-            class Open(SyntaxMeta):
-                pass
 
-            class Close(SyntaxMeta):
-                pass
+class NumericConstantHighlight(ConstantHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("numeric", *scope)
 
-        class SquareBracket(SyntaxMeta):
-            class Open(SyntaxMeta):
-                pass
 
-            class Close(SyntaxMeta):
-                pass
+class EntityHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("entity", *scope)
 
-    class Storage(SyntaxMeta):
-        class Type(SyntaxMeta):
-            class Class(SyntaxMeta):
-                pass
 
-            class Function(SyntaxMeta):
-                pass
+class NameEntityHighlight(EntityHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("name", *scope)
 
-    class String(SyntaxMeta):
-        class Quoted(SyntaxMeta):
-            class Single(SyntaxMeta):
-                pass
 
-            class Double(SyntaxMeta):
-                pass
+class FunctionNameEntityHighlight(NameEntityHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("function", *scope)
 
-    class Variable(SyntaxMeta):
-        class Language(SyntaxMeta):
-            pass
 
+class TypeNameEntityHighlight(NameEntityHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("type", *scope)
+
+
+class KeywordHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("keyword", *scope)
+
+
+class ControlKeywordHighlight(KeywordHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("control", *scope)
+
+
+class ConditionalControlKeywordHighlight(ControlKeywordHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("conditional", *scope)
+
+
+class OperatorKeywordHighlight(KeywordHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("operator", *scope)
+
+
+class ExpressionOperatorKeywordHighlight(OperatorKeywordHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("expression", *scope)
+
+
+class OtherKeywordHighlight(KeywordHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("other", *scope)
+
+
+class PunctuationHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("punctuation", *scope)
+
+
+class SeparatorPunctuationHighlight(PunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("separator", *scope)
+
+
+class ParenthesisPunctuationHighlight(PunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("parenthesis", *scope)
+
+
+class OpenParenthesisPunctuationHighlight(ParenthesisPunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("open", *scope)
+
+
+class CloseParenthesisPunctuationHighlight(ParenthesisPunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("close", *scope)
+
+
+class CurlyBracePunctuationHighlight(PunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("curlybrace", *scope)
+
+
+class OpenCurlyBracePunctuationHighlight(CurlyBracePunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("open", *scope)
+
+
+class CloseCurlyBracePunctuationHighlight(CurlyBracePunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("close", *scope)
+
+
+class SquareBracketPunctuationHighlight(PunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("squarebracket", *scope)
+
+
+class OpenSquareBracketPunctuationHighlight(SquareBracketPunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("open", *scope)
+
+
+class CloseSquareBracketPunctuationHighlight(SquareBracketPunctuationHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("close", *scope)
+
+
+class StorageHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("storage", *scope)
+
+
+class TypeStorageHighlight(StorageHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("type", *scope)
+
+
+class ClassTypeStorageHighlight(TypeStorageHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("class", *scope)
+
+
+class FunctionTypeStorageHighlight(TypeStorageHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("function", *scope)
+
+
+class StructTypeStorageHighlight(TypeStorageHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("struct", *scope)
+
+
+class StringHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("string", *scope)
+
+
+class QuotedStringHighlight(StringHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("quoted", *scope)
+
+
+class SingleQuotedStringHighlight(QuotedStringHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("single", *scope)
+
+
+class DoubleQuotedStringHighlight(QuotedStringHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("double", *scope)
+
+
+class VariableHighlight(HighlightMeta):
+    def __init__(self, *scope: str):
+        super().__init__("variable", *scope)
+
+
+class LanguageVariableHighlight(VariableHighlight):
+    def __init__(self, *scope: str):
+        super().__init__("language", *scope)
+
+
+class _Highlight:
+    class _Comment(CommentHighlight):
+        line = LineCommentHighlight()
+
+    class _Constant(ConstantHighlight):
+        language = LanguageConstantHighlight()
+        numeric = NumericConstantHighlight()
+
+    class _Entity(EntityHighlight):
+        class _Name(NameEntityHighlight):
+            function = FunctionNameEntityHighlight()
+            type = TypeNameEntityHighlight()
+
+        name = _Name()
+
+    class _Keyword(KeywordHighlight):
+        class _Control(ControlKeywordHighlight):
+            conditional = ConditionalControlKeywordHighlight()
+
+        class _Operator(OperatorKeywordHighlight):
+            expression = ExpressionOperatorKeywordHighlight()
+
+        control = _Control()
+        operator = _Operator()
+        other = OtherKeywordHighlight()
+
+    class _Punctuation:
+        class _Parenthesis:
+            open = OpenParenthesisPunctuationHighlight()
+            close = CloseParenthesisPunctuationHighlight()
+
+        class _CurlyBrace:
+            open = OpenCurlyBracePunctuationHighlight()
+            close = CloseCurlyBracePunctuationHighlight()
+
+        class _SquareBracket:
+            open = OpenSquareBracketPunctuationHighlight()
+            close = CloseSquareBracketPunctuationHighlight()
+
+        parenthesis = _Parenthesis()
+        curly_brace = _CurlyBrace()
+        square_bracket = _SquareBracket()
+        separator = SeparatorPunctuationHighlight()
+
+    class _Storage(StorageHighlight):
+        class _Type(TypeStorageHighlight):
+
+            klass = ClassTypeStorageHighlight()  # Sorry.
+            function = FunctionTypeStorageHighlight()
+            struct = StructTypeStorageHighlight()
+
+        type = _Type()
+
+    class _String(StringHighlight):
+        class _Quoted(QuotedStringHighlight):
+            single = SingleQuotedStringHighlight()
+            double = DoubleQuotedStringHighlight()
+
+        quoted = _Quoted()
+
+    class _Variable(VariableHighlight):
+        language = LanguageVariableHighlight()
+
+    comment = _Comment()
+    constant = _Constant()
+    entity = _Entity()
+    keyword = _Keyword()
+    punctuation = _Punctuation()
+    storage = _Storage()
+    string = _String()
+    variable = _Variable()
+
+
+highlight = _Highlight()
 
 ###############################################################################
 # Finally, the base class for grammars

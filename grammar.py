@@ -1,5 +1,5 @@
 # This is an example grammar.
-from parser import alt, Assoc, Grammar, rule, seq, Rule, Terminal, Re, Highlight, mark, opt
+from parser import alt, Assoc, Grammar, rule, seq, Rule, Terminal, Re, highlight, mark, opt
 
 
 class FineGrammar(Grammar):
@@ -52,7 +52,7 @@ class FineGrammar(Grammar):
     def class_declaration(self) -> Rule:
         return seq(
             self.CLASS,
-            mark(self.IDENTIFIER, highlight=Highlight.Entity.Name.Type),
+            mark(self.IDENTIFIER, highlight=highlight.entity.name.type),
             self._class_body,
         )
 
@@ -107,7 +107,7 @@ class FineGrammar(Grammar):
     def function_declaration(self) -> Rule:
         return seq(
             self.FUN,
-            mark(self.IDENTIFIER, highlight=Highlight.Entity.Name.Function),
+            mark(self.IDENTIFIER, highlight=highlight.entity.name.function),
             self.function_parameters,
             opt(self.ARROW, self.type_expression),
             self.block,
@@ -330,32 +330,31 @@ class FineGrammar(Grammar):
     BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
     COMMENT = Terminal(
         Re.seq(Re.literal("//"), Re.set("\n").invert().star()),
-        highlight=Highlight.Comment.Line,
+        highlight=highlight.comment.line,
     )
 
-    ARROW = Terminal("->", highlight=Highlight.Keyword.Operator)
-    AS = Terminal("as", highlight=Highlight.Keyword.Operator.Expression)
-    BAR = Terminal("|", highlight=Highlight.Keyword.Operator.Expression)
-    CLASS = Terminal("class", highlight=Highlight.Storage.Type.Class)
-    COLON = Terminal(":", highlight=Highlight.Punctuation.Separator)
-    ELSE = Terminal("else", highlight=Highlight.Keyword.Control.Conditional)
-    FOR = Terminal("for", highlight=Highlight.Keyword.Control)
-    FUN = Terminal("fun", highlight=Highlight.Storage.Type.Function)
+    ARROW = Terminal("->", highlight=highlight.keyword.operator)
+    AS = Terminal("as", highlight=highlight.keyword.operator.expression)
+    BAR = Terminal("|", highlight=highlight.keyword.operator.expression)
+    CLASS = Terminal("class", highlight=highlight.storage.type.klass)
+    COLON = Terminal(":", highlight=highlight.punctuation.separator)
+    ELSE = Terminal("else", highlight=highlight.keyword.control.conditional)
+    FOR = Terminal("for", highlight=highlight.keyword.control)
+    FUN = Terminal("fun", highlight=highlight.storage.type.function)
     IDENTIFIER = Terminal(
         Re.seq(
             Re.set(("a", "z"), ("A", "Z"), "_"),
             Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
         ),
-        # highlight=Highlight.Variable, #?
     )
-    IF = Terminal("if", highlight=Highlight.Keyword.Control.Conditional)
-    IMPORT = Terminal("import", highlight=Highlight.Keyword.Other)
-    IN = Terminal("in", highlight=Highlight.Keyword.Operator)
-    LCURLY = Terminal("{", highlight=Highlight.Punctuation.CurlyBrace.Open)
-    RCURLY = Terminal("}", highlight=Highlight.Punctuation.CurlyBrace.Close)
-    LET = Terminal("let", highlight=Highlight.Keyword.Other)
-    RETURN = Terminal("return", highlight=Highlight.Keyword.Control)
-    SEMICOLON = Terminal(";", highlight=Highlight.Punctuation.Separator)
+    IF = Terminal("if", highlight=highlight.keyword.control.conditional)
+    IMPORT = Terminal("import", highlight=highlight.keyword.other)
+    IN = Terminal("in", highlight=highlight.keyword.operator)
+    LCURLY = Terminal("{", highlight=highlight.punctuation.curly_brace.open)
+    RCURLY = Terminal("}", highlight=highlight.punctuation.curly_brace.close)
+    LET = Terminal("let", highlight=highlight.keyword.other)
+    RETURN = Terminal("return", highlight=highlight.keyword.control)
+    SEMICOLON = Terminal(";", highlight=highlight.punctuation.separator)
     STRING = Terminal(
         # Double-quoted string.
         Re.seq(
@@ -369,27 +368,27 @@ class FineGrammar(Grammar):
             (~Re.set("'", "\\") | (Re.set("\\") + Re.any())).star(),
             Re.literal("'"),
         ),
-        highlight=Highlight.String.Quoted,
+        highlight=highlight.string.quoted,
     )
-    WHILE = Terminal("while", highlight=Highlight.Keyword.Control)
-    EQUAL = Terminal("=", highlight=Highlight.Keyword.Operator.Expression)
-    LPAREN = Terminal("(", highlight=Highlight.Punctuation.Parenthesis.Open)
-    RPAREN = Terminal(")", highlight=Highlight.Punctuation.Parenthesis.Close)
-    COMMA = Terminal(",", highlight=Highlight.Punctuation.Separator)
-    SELF = Terminal("self", name="SELFF", highlight=Highlight.Variable.Language)
-    OR = Terminal("or", highlight=Highlight.Keyword.Operator.Expression)
-    IS = Terminal("is", highlight=Highlight.Keyword.Operator.Expression)
-    AND = Terminal("and", highlight=Highlight.Keyword.Operator.Expression)
-    EQUALEQUAL = Terminal("==", highlight=Highlight.Keyword.Operator.Expression)
-    BANGEQUAL = Terminal("!=", highlight=Highlight.Keyword.Operator.Expression)
-    LESS = Terminal("<", highlight=Highlight.Keyword.Operator.Expression)
-    GREATER = Terminal(">", highlight=Highlight.Keyword.Operator.Expression)
-    LESSEQUAL = Terminal("<=", highlight=Highlight.Keyword.Operator.Expression)
-    GREATEREQUAL = Terminal(">=", highlight=Highlight.Keyword.Operator.Expression)
-    PLUS = Terminal("+", highlight=Highlight.Keyword.Operator.Expression)
-    MINUS = Terminal("-", highlight=Highlight.Keyword.Operator.Expression)
-    STAR = Terminal("*", highlight=Highlight.Keyword.Operator.Expression)
-    SLASH = Terminal("/", highlight=Highlight.Keyword.Operator.Expression)
+    WHILE = Terminal("while", highlight=highlight.keyword.control)
+    EQUAL = Terminal("=", highlight=highlight.keyword.operator.expression)
+    LPAREN = Terminal("(", highlight=highlight.punctuation.parenthesis.open)
+    RPAREN = Terminal(")", highlight=highlight.punctuation.parenthesis.close)
+    COMMA = Terminal(",", highlight=highlight.punctuation.separator)
+    SELF = Terminal("self", name="SELFF", highlight=highlight.variable.language)
+    OR = Terminal("or", highlight=highlight.keyword.operator.expression)
+    IS = Terminal("is", highlight=highlight.keyword.operator.expression)
+    AND = Terminal("and", highlight=highlight.keyword.operator.expression)
+    EQUALEQUAL = Terminal("==", highlight=highlight.keyword.operator.expression)
+    BANGEQUAL = Terminal("!=", highlight=highlight.keyword.operator.expression)
+    LESS = Terminal("<", highlight=highlight.keyword.operator.expression)
+    GREATER = Terminal(">", highlight=highlight.keyword.operator.expression)
+    LESSEQUAL = Terminal("<=", highlight=highlight.keyword.operator.expression)
+    GREATEREQUAL = Terminal(">=", highlight=highlight.keyword.operator.expression)
+    PLUS = Terminal("+", highlight=highlight.keyword.operator.expression)
+    MINUS = Terminal("-", highlight=highlight.keyword.operator.expression)
+    STAR = Terminal("*", highlight=highlight.keyword.operator.expression)
+    SLASH = Terminal("/", highlight=highlight.keyword.operator.expression)
     NUMBER = Terminal(
         Re.seq(
             Re.set(("0", "9")).plus(),
@@ -403,18 +402,18 @@ class FineGrammar(Grammar):
                 Re.set(("0", "9")).plus(),
             ).question(),
         ),
-        highlight=Highlight.Constant.Numeric,
+        highlight=highlight.constant.numeric,
     )
-    TRUE = Terminal("true", highlight=Highlight.Constant.Language)
-    FALSE = Terminal("false", highlight=Highlight.Constant.Language)
-    BANG = Terminal("!", highlight=Highlight.Keyword.Operator.Expression)
-    DOT = Terminal(".", highlight=Highlight.Punctuation.Separator)
-    MATCH = Terminal("match", highlight=Highlight.Keyword.Other)
-    EXPORT = Terminal("export", highlight=Highlight.Keyword.Other)
-    UNDERSCORE = Terminal("_", highlight=Highlight.Variable.Language)
-    NEW = Terminal("new", highlight=Highlight.Keyword.Operator)
-    LSQUARE = Terminal("[", highlight=Highlight.Punctuation.SquareBracket.Open)
-    RSQUARE = Terminal("]", highlight=Highlight.Punctuation.SquareBracket.Close)
+    TRUE = Terminal("true", highlight=highlight.constant.language)
+    FALSE = Terminal("false", highlight=highlight.constant.language)
+    BANG = Terminal("!", highlight=highlight.keyword.operator.expression)
+    DOT = Terminal(".", highlight=highlight.punctuation.separator)
+    MATCH = Terminal("match", highlight=highlight.keyword.other)
+    EXPORT = Terminal("export", highlight=highlight.keyword.other)
+    UNDERSCORE = Terminal("_", highlight=highlight.variable.language)
+    NEW = Terminal("new", highlight=highlight.keyword.operator)
+    LSQUARE = Terminal("[", highlight=highlight.punctuation.square_bracket.open)
+    RSQUARE = Terminal("]", highlight=highlight.punctuation.square_bracket.close)
 
 
 if __name__ == "__main__":
