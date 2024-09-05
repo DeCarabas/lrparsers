@@ -99,6 +99,17 @@ def to_javascript_regex(re: parser.Re) -> str:
     raise Exception(f"Regex node {re} not supported for tree-sitter")
 
 
+def terminal_to_tree_sitter(rule: parser.Terminal) -> str:
+    if isinstance(rule.pattern, parser.Re):
+        regex = to_javascript_regex(rule.pattern)
+        regex = regex.replace("/", "\\/")
+        result = f"/{regex}/"
+    else:
+        string = to_js_string(rule.pattern)
+        result = f'"{string}"'
+    return result
+
+
 def apply_precedence(js: str, name: str, grammar: parser.Grammar) -> str:
     prec = grammar.get_precedence(name)
     if prec is not None:
@@ -119,14 +130,7 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
         return method(grammar)
 
     if isinstance(rule, parser.Terminal):
-        if isinstance(rule.pattern, parser.Re):
-            regex = to_javascript_regex(rule.pattern)
-            result = f"/{regex}/"
-        else:
-            string = to_js_string(rule.pattern)
-            result = f'"{string}"'
-
-        return result
+        return terminal_to_tree_sitter(rule)
 
     elif isinstance(rule, parser.AlternativeRule):
         final = []
@@ -225,6 +229,10 @@ def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
         f.write("\n")
         f.write("module.exports = grammar({\n")
         f.write(f"  name: '{grammar.name}',\n")
+
+        extras = ", ".join([terminal_to_tree_sitter(t) for t in grammar.trivia_terminals()])
+        f.write(f"  extras: $ => [{extras}],\n")
+
         f.write("  rules: {\n")
         f.write(f"    source_file: $ => $['{grammar.start}'],\n")
         for rule in grammar.non_terminals():

@@ -2729,6 +2729,9 @@ class Grammar:
     def terminals(self) -> list[Terminal]:
         return self._terminals
 
+    def trivia_terminals(self) -> list[Terminal]:
+        return self._trivia
+
     def non_terminals(self) -> list[NonTerminal]:
         return [nt for _, nt in inspect.getmembers(self, lambda x: isinstance(x, NonTerminal))]
 
