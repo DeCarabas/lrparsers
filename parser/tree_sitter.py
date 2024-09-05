@@ -274,6 +274,7 @@ def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
 
 def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
     nts = {nt.name: nt for nt in grammar.non_terminals()}
+    scope_suffix = "." + grammar.name
 
     def scoop(input: parser.FlattenedWithMetadata, visited: set[str]) -> list[str]:
         parts = []
@@ -287,7 +288,7 @@ def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
                     field_name = meta.get("field")
                     if not isinstance(field_name, str):
                         raise Exception("Highlight must come with a field name")  # TODO
-                    parts.append(f"{field_name}: _ @{highlight.scope}")
+                    parts.append(f"{field_name}: _ @{highlight.scope}{scope_suffix}")
 
             elif isinstance(item, str):
                 nt = nts[item]
@@ -319,7 +320,7 @@ def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
     for rule in grammar.terminals():
         highlight = rule.meta.get("highlight")
         if isinstance(highlight, parser.HighlightMeta):
-            queries.append(f"({terminal_name(rule)}) @{highlight.scope}")
+            queries.append(f"({terminal_name(rule)}) @{highlight.scope}{scope_suffix}")
 
     path = pathlib.Path(path) / "queries"
     if not path.exists():
