@@ -1567,6 +1567,9 @@ class GenerateLALR(GenerateLR1):
         return result
 
 
+FlattenedWithMetadata = list["str|Terminal|tuple[dict[str,typing.Any],FlattenedWithMetadata]"]
+
+
 ###############################################################################
 # Sugar for constructing grammars
 ###############################################################################
@@ -1584,7 +1587,9 @@ class Rule:
         return SequenceRule(self, other)
 
     @abc.abstractmethod
-    def flatten(self) -> typing.Generator[list["str | Terminal"], None, None]:
+    def flatten(
+        self, with_metadata: bool = False
+    ) -> typing.Generator[FlattenedWithMetadata, None, None]:
         """Convert this potentially nested and branching set of rules into a
         series of nice, flat symbol lists.
 
@@ -1618,8 +1623,11 @@ class Terminal(Rule):
         self.meta = kwargs
         self.regex = isinstance(pattern, Re)
 
-    def flatten(self) -> typing.Generator[list["str | Terminal"], None, None]:
+    def flatten(
+        self, with_metadata: bool = False
+    ) -> typing.Generator[FlattenedWithMetadata, None, None]:
         # We are just ourselves when flattened.
+        del with_metadata
         yield [self]
 
     def __repr__(self) -> str:
@@ -1660,14 +1668,24 @@ class NonTerminal(Rule):
 
         We do this by first calling the associated function in order to get a
         Rule, and then flattening the Rule into the associated set of
-        productions.
+        productions. We strip the metadata from the flattened result to make
+        life a little easier for the caller.
         """
-        return [rule for rule in self.fn(grammar).flatten()]
 
-    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
+        def without_metadata(result: FlattenedWithMetadata) -> list[str | Terminal]:
+            for item in result:
+                assert not isinstance(item, tuple)
+            return typing.cast(list[str | Terminal], result)
+
+        return [without_metadata(rule) for rule in self.fn(grammar).flatten(with_metadata=False)]
+
+    def flatten(
+        self, with_metadata: bool = False
+    ) -> typing.Generator[FlattenedWithMetadata, None, None]:
         # Although we contain multitudes, when flattened we're being asked in
         # the context of some other production. Yield ourselves, and trust that
         # in time we will be asked to generate our body.
+        del with_metadata
         yield [self.name]
 
 
@@ -1678,11 +1696,13 @@ class AlternativeRule(Rule):
         self.left = left
         self.right = right
 
-    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
+    def flatten(
+        self, with_metadata: bool = False
+    ) -> typing.Generator[FlattenedWithMetadata, None, None]:
         # All the things from the left of the alternative, then all the things
         # from the right, never intermingled.
-        yield from self.left.flatten()
-        yield from self.right.flatten()
+        yield from self.left.flatten(with_metadata)
+        yield from self.right.flatten(with_metadata)
 
 
 class SequenceRule(Rule):
@@ -1694,11 +1714,13 @@ class SequenceRule(Rule):
         self.first = first
         self.second = second
 
-    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
+    def flatten(
+        self, with_metadata: bool = False
+    ) -> typing.Generator[FlattenedWithMetadata, None, None]:
         # All the things in the prefix....
-        for first in self.first.flatten():
+        for first in self.first.flatten(with_metadata):
             # ...potentially followed by all the things in the suffix.
-            for second in self.second.flatten():
+            for second in self.second.flatten(with_metadata):
                 yield first + second
 
 
@@ -1707,12 +1729,30 @@ class NothingRule(Rule):
     these, you're probably better off just using the singleton `Nothing`.
     """
 
-    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
+    def flatten(
+        self, with_metadata: bool = False
+    ) -> typing.Generator[FlattenedWithMetadata, None, None]:
         # It's quiet in here.
+        del with_metadata
         yield []
 
 
 Nothing = NothingRule()
+
+
+class MetadataRule(Rule):
+    def __init__(self, rule: Rule, metadata: dict[str, typing.Any]):
+        self.rule = rule
+        self.metadata = metadata
+
+    def flatten(
+        self, with_metadata: bool = False
+    ) -> typing.Generator[FlattenedWithMetadata, None, None]:
+        if with_metadata:
+            for result in self.rule.flatten(with_metadata=True):
+                yield [(self.metadata, result)]
+        else:
+            yield from self.rule.flatten(with_metadata=False)
 
 
 def alt(*args: Rule) -> Rule:
@@ -1739,15 +1779,6 @@ def seq(*args: Rule) -> Rule:
 
 def opt(*args: Rule) -> Rule:
     return AlternativeRule(seq(*args), Nothing)
-
-
-class MetadataRule(Rule):
-    def __init__(self, rule: Rule, metadata: dict[str, typing.Any]):
-        self.rule = rule
-        self.metadata = metadata
-
-    def flatten(self) -> typing.Generator[list[str | Terminal], None, None]:
-        yield from self.rule.flatten()
 
 
 def mark(rule: Rule, **kwargs) -> Rule:

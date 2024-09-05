@@ -83,7 +83,7 @@ class FineGrammar(Grammar):
 
     @rule("TypeIdentifier")
     def type_identifier(self) -> Rule:
-        return self.IDENTIFIER
+        return mark(self.IDENTIFIER, field="id", highlight=highlight.entity.name.type)
 
     @rule
     def export_statement(self) -> Rule:
@@ -419,7 +419,7 @@ class FineGrammar(Grammar):
 if __name__ == "__main__":
     from pathlib import Path
     from parser.parser import dump_lexer_table
-    from parser.tree_sitter import emit_tree_sitter_grammar
+    from parser.tree_sitter import emit_tree_sitter_grammar, emit_tree_sitter_queries
 
     grammar = FineGrammar()
     grammar.build_table()
@@ -428,3 +428,4 @@ if __name__ == "__main__":
     dump_lexer_table(lexer)
 
     emit_tree_sitter_grammar(grammar, Path(__file__).parent / "tree-sitter-fine")
+    emit_tree_sitter_queries(grammar, Path(__file__).parent / "tree-sitter-fine")

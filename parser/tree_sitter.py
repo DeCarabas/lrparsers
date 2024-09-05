@@ -270,3 +270,57 @@ def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
 
         f.write("\n  }\n")
         f.write("});")
+
+
+def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
+    nts = {nt.name: nt for nt in grammar.non_terminals()}
+
+    def scoop(input: parser.FlattenedWithMetadata, visited: set[str]) -> list[str]:
+        parts = []
+        for item in input:
+            if isinstance(item, tuple):
+                meta, sub = item
+                parts.extend(scoop(sub, visited))
+
+                highlight = meta.get("highlight")
+                if isinstance(highlight, parser.HighlightMeta):
+                    field_name = meta.get("field")
+                    if not isinstance(field_name, str):
+                        raise Exception("Highlight must come with a field name")  # TODO
+                    parts.append(f"{field_name}: _ @{highlight.scope}")
+
+            elif isinstance(item, str):
+                nt = nts[item]
+                if nt.transparent:
+                    if nt.name in visited:
+                        continue
+                    visited.add(nt.name)
+                    body = nt.fn(grammar)
+                    for production in body.flatten(with_metadata=True):
+                        parts.extend(scoop(production, visited))
+
+        return parts
+
+    queries = []
+    for rule in grammar.non_terminals():
+        if rule.transparent:
+            continue
+
+        body = rule.fn(grammar)
+        patterns = set()
+        for production in body.flatten(with_metadata=True):
+            # Scoop up the meta...
+            patterns = patterns | set(scoop(production, set()))
+
+        if len(patterns) > 0:
+            pattern_str = "\n    ".join(patterns)
+            queries.append(f"({rule.name}\n    {pattern_str})")
+
+    for rule in grammar.terminals():
+        highlight = rule.meta.get("highlight")
+        if isinstance(highlight, parser.HighlightMeta):
+            queries.append(f"({terminal_name(rule)} @{highlight.scope})")
+
+    path = pathlib.Path(path) / "highlight.scm"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n\n".join(queries))
