@@ -205,7 +205,11 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
         return f"$['{target_name}']"
 
     elif isinstance(rule, parser.MetadataRule):
-        return convert_to_tree_sitter(rule.rule, grammar)
+        result = convert_to_tree_sitter(rule.rule, grammar)
+        field = rule.metadata.get("field")
+        if field is not None:
+            result = f"field('{field}', {result})"
+        return result
 
     else:
         raise ValueError(f"Rule {rule} not supported for tree-sitter")
