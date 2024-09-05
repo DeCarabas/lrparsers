@@ -30,6 +30,9 @@ exclude = ["historical", ".venv"]
 venvPath = "."
 venv = ".venv"
 
+[tool.pytest.ini_options]
+norecursedirs = "tree-sitter-fine"
+
 [build-system]
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
