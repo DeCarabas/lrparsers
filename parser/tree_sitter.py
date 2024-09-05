@@ -319,8 +319,12 @@ def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
     for rule in grammar.terminals():
         highlight = rule.meta.get("highlight")
         if isinstance(highlight, parser.HighlightMeta):
-            queries.append(f"({terminal_name(rule)} @{highlight.scope})")
+            queries.append(f"({terminal_name(rule)}) @{highlight.scope}")
 
-    path = pathlib.Path(path) / "highlight.scm"
+    path = pathlib.Path(path) / "queries"
+    if not path.exists():
+        path.mkdir(parents=True)
+
+    path = path / "highlights.scm"
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n\n".join(queries))
