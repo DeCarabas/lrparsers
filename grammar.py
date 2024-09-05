@@ -52,8 +52,8 @@ class FineGrammar(Grammar):
     def class_declaration(self) -> Rule:
         return seq(
             self.CLASS,
-            mark(self.IDENTIFIER, highlight=highlight.entity.name.type),
-            self._class_body,
+            mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.type),
+            mark(self._class_body, field="body"),
         )
 
     @rule
@@ -107,10 +107,10 @@ class FineGrammar(Grammar):
     def function_declaration(self) -> Rule:
         return seq(
             self.FUN,
-            mark(self.IDENTIFIER, highlight=highlight.entity.name.function),
-            self.function_parameters,
-            opt(self.ARROW, self.type_expression),
-            self.block,
+            mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.function),
+            mark(self.function_parameters, field="parameters"),
+            mark(opt(self.ARROW, self.type_expression), field="return_type"),
+            mark(self.block, field="body"),
         )
 
     @rule("ParamList")
