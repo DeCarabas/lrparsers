@@ -1,5 +1,20 @@
 # This is an example grammar.
-from parser import alt, Assoc, Grammar, rule, seq, Rule, Terminal, Re, highlight, mark, opt
+from parser import (
+    Assoc,
+    Grammar,
+    Re,
+    Rule,
+    Terminal,
+    alt,
+    group,
+    highlight,
+    indent,
+    mark,
+    newline,
+    opt,
+    rule,
+    seq,
+)
 
 
 class FineGrammar(Grammar):
@@ -36,7 +51,10 @@ class FineGrammar(Grammar):
 
     @rule
     def _file_statement_list(self) -> Rule:
-        return self._file_statement | (self._file_statement_list + self._file_statement)
+        return alt(
+            self._file_statement,
+            self._file_statement_list + newline() + self._file_statement,
+        )
 
     @rule
     def _file_statement(self) -> Rule:
@@ -51,10 +69,19 @@ class FineGrammar(Grammar):
     @rule("ClassDeclaration")
     def class_declaration(self) -> Rule:
         return seq(
-            self.CLASS,
-            mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.type),
-            self.LCURLY,
-            mark(opt(self.class_body), field="body"),
+            group(
+                group(
+                    self.CLASS,
+                    newline(),
+                    mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.type),
+                ),
+                self.LCURLY,
+            ),
+            indent(
+                newline(),
+                mark(opt(self.class_body), field="body"),
+            ),
+            newline(),
             self.RCURLY,
         )
 
@@ -117,13 +144,17 @@ class FineGrammar(Grammar):
 
     @rule("ParamList")
     def function_parameters(self) -> Rule:
-        return seq(
+        return group(
             self.LPAREN,
-            opt(
-                self._first_parameter
-                | seq(self._first_parameter, self.COMMA)
-                | seq(self._first_parameter, self.COMMA, self._parameter_list)
+            indent(
+                newline(),
+                opt(
+                    self._first_parameter
+                    | seq(self._first_parameter, self.COMMA)
+                    | group(self._first_parameter, self.COMMA, newline(), self._parameter_list)
+                ),
             ),
+            newline(),
             self.RPAREN,
         )
 
@@ -133,7 +164,7 @@ class FineGrammar(Grammar):
 
     @rule
     def _parameter_list(self) -> Rule:
-        return self.parameter | seq(self.parameter, self.COMMA, self._parameter_list)
+        return self.parameter | seq(self.parameter, self.COMMA, newline(), self._parameter_list)
 
     @rule("Parameter")
     def parameter(self) -> Rule:
@@ -144,7 +175,7 @@ class FineGrammar(Grammar):
     def block(self) -> Rule:
         return alt(
             seq(self.LCURLY, self.RCURLY),
-            seq(self.LCURLY, self.block_body, self.RCURLY),
+            group(self.LCURLY, indent(newline(), self.block_body), newline(), self.RCURLY),
         )
 
     @rule("BlockBody")
@@ -152,7 +183,7 @@ class FineGrammar(Grammar):
         return alt(
             self.expression,
             self._statement_list,
-            seq(self._statement_list, self.expression),
+            seq(self._statement_list, newline(), self.expression),
         )
 
     @rule

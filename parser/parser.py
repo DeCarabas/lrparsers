@@ -1785,6 +1785,18 @@ def mark(rule: Rule, **kwargs) -> Rule:
     return MetadataRule(rule, kwargs)
 
 
+def group(*rules: Rule) -> Rule:
+    return seq(*rules)
+
+
+def indent(*rules: Rule) -> Rule:
+    return seq(*rules)
+
+
+def newline() -> Rule:
+    return Nothing
+
+
 @typing.overload
 def rule(f: typing.Callable, /) -> Rule: ...
 
