@@ -439,4 +439,4 @@ if __name__ == "__main__":
     ts_path = Path(__file__).parent / "tree-sitter-fine"
     emit_tree_sitter_grammar(grammar, ts_path)
     emit_tree_sitter_queries(grammar, ts_path)
-    emit_emacs_major_mode(grammar, ts_path)
+    emit_emacs_major_mode(grammar, ts_path / "fine.el")
