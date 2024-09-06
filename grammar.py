@@ -53,12 +53,14 @@ class FineGrammar(Grammar):
         return seq(
             self.CLASS,
             mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.type),
-            mark(self._class_body, field="body"),
+            self.LCURLY,
+            mark(opt(self.class_body), field="body"),
+            self.RCURLY,
         )
 
-    @rule
-    def _class_body(self) -> Rule:
-        return seq(self.LCURLY, self.RCURLY) | seq(self.LCURLY, self._class_members, self.RCURLY)
+    @rule("ClassBody")
+    def class_body(self) -> Rule:
+        return self._class_members
 
     @rule
     def _class_members(self) -> Rule:
@@ -140,11 +142,17 @@ class FineGrammar(Grammar):
     # Block
     @rule("Block")
     def block(self) -> Rule:
-        return (
-            seq(self.LCURLY, self.RCURLY)
-            | seq(self.LCURLY, self.expression, self.RCURLY)
-            | seq(self.LCURLY, self._statement_list, self.RCURLY)
-            | seq(self.LCURLY, self._statement_list, self.expression, self.RCURLY)
+        return alt(
+            seq(self.LCURLY, self.RCURLY),
+            seq(self.LCURLY, self.block_body, self.RCURLY),
+        )
+
+    @rule("BlockBody")
+    def block_body(self) -> Rule:
+        return alt(
+            self.expression,
+            self._statement_list,
+            seq(self._statement_list, self.expression),
         )
 
     @rule
@@ -419,6 +427,7 @@ class FineGrammar(Grammar):
 if __name__ == "__main__":
     from pathlib import Path
     from parser.parser import dump_lexer_table
+    from parser.emacs import emit_emacs_major_mode
     from parser.tree_sitter import emit_tree_sitter_grammar, emit_tree_sitter_queries
 
     grammar = FineGrammar()
@@ -427,5 +436,7 @@ if __name__ == "__main__":
     lexer = grammar.compile_lexer()
     dump_lexer_table(lexer)
 
-    emit_tree_sitter_grammar(grammar, Path(__file__).parent / "tree-sitter-fine")
-    emit_tree_sitter_queries(grammar, Path(__file__).parent / "tree-sitter-fine")
+    ts_path = Path(__file__).parent / "tree-sitter-fine"
+    emit_tree_sitter_grammar(grammar, ts_path)
+    emit_tree_sitter_queries(grammar, ts_path)
+    emit_emacs_major_mode(grammar, ts_path)
