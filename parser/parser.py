@@ -2374,14 +2374,20 @@ class SyntaxMeta:
 
 class HighlightMeta(SyntaxMeta):
     scope: str
+    font_lock_face: str | None
+    font_lock_feature: str | None
 
     def __init__(self, *scope: str):
         self.scope = ".".join(scope)
+        self.font_lock_face = None
+        self.font_lock_feature = None
 
 
 class CommentHighlight(HighlightMeta):
     def __init__(self, *scope: str):
         super().__init__("comment", *scope)
+        self.font_lock_face = "font-lock-comment-face"
+        self.font_lock_feature = "comment"
 
 
 class BlockCommentHighlight(CommentHighlight):
@@ -2397,6 +2403,8 @@ class LineCommentHighlight(CommentHighlight):
 class ConstantHighlight(HighlightMeta):
     def __init__(self, *scope: str):
         super().__init__("constant", *scope)
+        self.font_lock_face = "font-lock-constant-face"
+        self.font_lock_feature = "constant"
 
 
 class LanguageConstantHighlight(ConstantHighlight):
@@ -2407,6 +2415,8 @@ class LanguageConstantHighlight(ConstantHighlight):
 class NumericConstantHighlight(ConstantHighlight):
     def __init__(self, *scope: str):
         super().__init__("numeric", *scope)
+        self.font_lock_feature = "number"
+        self.font_lock_face = "font-lock-number-face"
 
 
 class EntityHighlight(HighlightMeta):
@@ -2417,21 +2427,27 @@ class EntityHighlight(HighlightMeta):
 class NameEntityHighlight(EntityHighlight):
     def __init__(self, *scope: str):
         super().__init__("name", *scope)
+        self.font_lock_face = "font-lock-variable-name-face"
+        self.font_lock_feature = "definition"
 
 
 class FunctionNameEntityHighlight(NameEntityHighlight):
     def __init__(self, *scope: str):
         super().__init__("function", *scope)
+        self.font_lock_face = "font-lock-function-name-face"
 
 
 class TypeNameEntityHighlight(NameEntityHighlight):
     def __init__(self, *scope: str):
         super().__init__("type", *scope)
+        self.font_lock_feature = "type"
 
 
 class KeywordHighlight(HighlightMeta):
     def __init__(self, *scope: str):
         super().__init__("keyword", *scope)
+        self.font_lock_feature = "keyword"
+        self.font_lock_face = "font-lock-keyword-face"
 
 
 class ControlKeywordHighlight(KeywordHighlight):
@@ -2447,6 +2463,8 @@ class ConditionalControlKeywordHighlight(ControlKeywordHighlight):
 class OperatorKeywordHighlight(KeywordHighlight):
     def __init__(self, *scope: str):
         super().__init__("operator", *scope)
+        self.font_lock_feature = "operator"
+        self.font_lock_face = "font-lock-operator-face"
 
 
 class ExpressionOperatorKeywordHighlight(OperatorKeywordHighlight):
@@ -2462,6 +2480,8 @@ class OtherKeywordHighlight(KeywordHighlight):
 class PunctuationHighlight(HighlightMeta):
     def __init__(self, *scope: str):
         super().__init__("punctuation", *scope)
+        self.font_lock_feature = "delimiter"
+        self.font_lock_face = "font-lock-punctuation-face"
 
 
 class SeparatorPunctuationHighlight(PunctuationHighlight):
@@ -2472,6 +2492,8 @@ class SeparatorPunctuationHighlight(PunctuationHighlight):
 class ParenthesisPunctuationHighlight(PunctuationHighlight):
     def __init__(self, *scope: str):
         super().__init__("parenthesis", *scope)
+        self.font_lock_feature = "bracket"
+        self.font_lock_face = "font-lock-bracket-face"
 
 
 class OpenParenthesisPunctuationHighlight(ParenthesisPunctuationHighlight):
@@ -2487,6 +2509,8 @@ class CloseParenthesisPunctuationHighlight(ParenthesisPunctuationHighlight):
 class CurlyBracePunctuationHighlight(PunctuationHighlight):
     def __init__(self, *scope: str):
         super().__init__("curlybrace", *scope)
+        self.font_lock_feature = "bracket"
+        self.font_lock_face = "font-lock-bracket-face"
 
 
 class OpenCurlyBracePunctuationHighlight(CurlyBracePunctuationHighlight):
@@ -2502,6 +2526,8 @@ class CloseCurlyBracePunctuationHighlight(CurlyBracePunctuationHighlight):
 class SquareBracketPunctuationHighlight(PunctuationHighlight):
     def __init__(self, *scope: str):
         super().__init__("squarebracket", *scope)
+        self.font_lock_feature = "bracket"
+        self.font_lock_face = "font-lock-bracket-face"
 
 
 class OpenSquareBracketPunctuationHighlight(SquareBracketPunctuationHighlight):
@@ -2517,6 +2543,8 @@ class CloseSquareBracketPunctuationHighlight(SquareBracketPunctuationHighlight):
 class StorageHighlight(HighlightMeta):
     def __init__(self, *scope: str):
         super().__init__("storage", *scope)
+        self.font_lock_feature = "keyword"
+        self.font_lock_face = "font-lock-keyword-face"
 
 
 class TypeStorageHighlight(StorageHighlight):
@@ -2542,6 +2570,8 @@ class StructTypeStorageHighlight(TypeStorageHighlight):
 class StringHighlight(HighlightMeta):
     def __init__(self, *scope: str):
         super().__init__("string", *scope)
+        self.font_lock_feature = "string"
+        self.font_lock_face = "font-lock-string-face"
 
 
 class QuotedStringHighlight(StringHighlight):
@@ -2562,11 +2592,15 @@ class DoubleQuotedStringHighlight(QuotedStringHighlight):
 class VariableHighlight(HighlightMeta):
     def __init__(self, *scope: str):
         super().__init__("variable", *scope)
+        self.font_lock_feature = "variable"
+        self.font_lock_face = "font-lock-variable-use-face"
 
 
 class LanguageVariableHighlight(VariableHighlight):
     def __init__(self, *scope: str):
         super().__init__("language", *scope)
+        self.font_lock_feature = "builtin"
+        self.font_lock_face = "font-lock-builtin-face"
 
 
 class _Highlight:
