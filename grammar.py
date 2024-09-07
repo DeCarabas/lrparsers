@@ -116,11 +116,11 @@ class FineGrammar(Grammar):
 
     @rule
     def export_statement(self) -> Rule:
-        return (
-            seq(self.EXPORT, self.class_declaration)
-            | seq(self.EXPORT, self.function_declaration)
-            | seq(self.EXPORT, self.let_statement)
-            | seq(self.EXPORT, self.export_list, self.SEMICOLON)
+        return alt(
+            seq(self.EXPORT, self.class_declaration),
+            seq(self.EXPORT, self.function_declaration),
+            seq(self.EXPORT, self.let_statement),
+            seq(self.EXPORT, self.export_list, self.SEMICOLON),
         )
 
     @rule
