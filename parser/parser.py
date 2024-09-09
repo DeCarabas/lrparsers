@@ -2815,10 +2815,12 @@ class Grammar:
     def get_precedence(self, name: str) -> None | tuple[Assoc, int]:
         return self._precedence.get(name)
 
+    # TODO: The flattened form should retain NonTerminal, not just str.
     def generate_nonterminal_dict(
         self, start: str | None = None
     ) -> typing.Tuple[dict[str, list[list[str | Terminal]]], set[str]]:
-        """Convert the rules into a dictionary of productions.
+        """Convert the rules into a dictionary of productions, and a set of
+        the names of transparent nonterminals.
 
         Our table generators work on a very flat set of productions. This is the
         first step in flattening the productions from the members: walk the rules
@@ -2838,6 +2840,8 @@ class Grammar:
         rule = nonterminals.get(start)
         if rule is None:
             raise ValueError(f"Cannot find a rule named '{start}'")
+        if rule.transparent:
+            raise ValueError("The start rule cannot be transparent")
         queue = [rule]
         while len(queue) > 0:
             rule = queue.pop()
