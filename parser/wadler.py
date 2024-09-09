@@ -1,7 +1,5 @@
 # A prettier printer.
-import abc
 import dataclasses
-import math
 import typing
 
 from . import parser
@@ -52,6 +50,10 @@ class Lazy:
             self.value = self.value()
         return self.value
 
+    @classmethod
+    def from_tree(cls, tree: runtime.Tree, printer: "Printer") -> "Lazy":
+        return Lazy(lambda: printer.convert_tree_to_document(tree))
+
 
 Document = None | Text | NewLine | Cons | Indent | Group | Lazy
 
@@ -78,208 +80,88 @@ def layout_document(doc: Document) -> typing.Generator[str, None, None]:
     raise NotImplementedError()
 
 
-@dataclasses.dataclass(frozen=True)
-class MatchTerminal:
-    name: str
+def child_to_name(child: runtime.Tree | runtime.TokenValue) -> str:
+    if isinstance(child, runtime.Tree):
+        return f"tree_{child.name}"
+    else:
+        return f"token_{child.kind}"
 
 
-@dataclasses.dataclass(frozen=True)
-class MatchNonTerminal:
-    name: str
-
-
-@dataclasses.dataclass(frozen=True)
-class Accept:
-    pass
-
-
-@dataclasses.dataclass(frozen=True)
-class StartGroup:
-    pass
-
-
-@dataclasses.dataclass(frozen=True)
-class EndGroup:
-    pass
-
-
-@dataclasses.dataclass(frozen=True)
-class StartIndent:
-    pass
-
-
-@dataclasses.dataclass(frozen=True)
-class EndIndent:
-    amount: int
-
-
-@dataclasses.dataclass(frozen=True)
-class Split:
-    left: int
-    right: int
-
-
-@dataclasses.dataclass(frozen=True)
-class Jump:
-    next: int
-
-
-MatchInstruction = (
-    MatchTerminal
-    | MatchNonTerminal
-    | Accept
-    | StartGroup
-    | EndGroup
-    | NewLine
-    | StartIndent
-    | EndIndent
-    | Split
-    | Jump
-)
-
-
-### THIS DOESN'T WORK
-###
-### YOU CANNOT MATCH RULES WITH TRANSPARENT CHILDREN WITH A FSM, THIS IS NOT
-### A REGULAR LANGUAGE IT IS CONTEXT FREE SO WE NEED TO RUN OUR REAL PARSER
-### WHICH MEANS YES WE NEED TO GENERATE TABLES AGAIN OUT OF SUB-GRAMMARS FOR
-### PRODUCTIONS BUT ALSO GENERATE NEW ONES FOR META AND ALSO RUN ACTIONS
-###
-### CHRIST.
-###
 class Matcher:
-    code: list[MatchInstruction]
+    table: parser.ParseTable
+    indent_amounts: dict[str, int]
 
-    def __init__(self):
-        self.code = []
-
-    @dataclasses.dataclass
-    class ThreadState:
-        pc: int
-        position: int
-        count: int
-        results: list[Document | StartGroup | StartIndent]
+    def __init__(self, table: parser.ParseTable, indent_amounts):
+        self.table = table
+        self.indent_amounts = indent_amounts
 
     def match(self, printer: "Printer", items: list[runtime.Tree | runtime.TokenValue]) -> Document:
-        threads: list[Matcher.ThreadState] = [
-            Matcher.ThreadState(pc=0, position=0, results=[], count=0)
+        stack: list[tuple[int, Document]] = [(0, None)]
+        table = self.table
+
+        input = [(child_to_name(i), i) for i in items] + [
+            ("$", runtime.TokenValue(kind="$", start=0, end=0))
         ]
+        input_index = 0
 
-        while len(threads) > 0:
-            thread = threads.pop()
-            results = thread.results
-            while True:
-                thread.count += 1
-                if thread.count > 1000:
-                    raise Exception("Too many steps!")
+        while True:
+            current_token = input[input_index]
+            current_state = stack[-1][0]
+            action = table.actions[current_state].get(current_token[0], parser.Error())
 
-                inst = self.code[thread.pc]
-                print(f"THREAD: {thread.pc}: {inst} ({thread.position})")
-                match inst:
-                    case MatchTerminal(name):
-                        if thread.position >= len(items):
-                            break
+            # print(
+            #     "{stack: <30} {input: <15} {action: <5}".format(
+            #         stack=repr([s[0] for s in stack[-5:]]),
+            #         input=current_token[0],
+            #         action=repr(action),
+            #     )
+            # )
 
-                        item = items[thread.position]
-                        if not isinstance(item, runtime.TokenValue):
-                            break
+            match action:
+                case parser.Accept():
+                    return stack[-1][1]
 
-                        if item.kind != name:
-                            break
+                case parser.Reduce(name=name, count=size):
+                    child: Document = None
+                    if size > 0:
+                        for _, c in stack[-size:]:
+                            if c is None:
+                                continue
+                            child = cons(child, c)
+                        del stack[-size:]
 
-                        results.append(Text(item.start, item.end))
-                        thread.pc += 1
-                        thread.position += 1
+                    if name[0] == "g":
+                        child = Group(child)
 
-                    case MatchNonTerminal(name):
-                        if thread.position >= len(items):
-                            break
+                    elif name[0] == "i":
+                        amount = self.indent_amounts[name]
+                        child = Indent(amount, child)
 
-                        item = items[thread.position]
-                        if not isinstance(item, runtime.Tree):
-                            break
+                    elif name[0] == "n":
+                        child = cons(child, NewLine())
 
-                        if item.name != name:
-                            break
+                    elif name[0] == "p":
+                        child = cons(NewLine(), child)
 
-                        def thunk(capture: runtime.Tree):
-                            return lambda: printer.convert_tree_to_document(capture)
+                    else:
+                        pass  # ???
 
-                        results.append(Lazy(thunk(item)))
-                        thread.pc += 1
-                        thread.position += 1
+                    goto = self.table.gotos[stack[-1][0]].get(name)
+                    assert goto is not None
+                    stack.append((goto, child))
 
-                    case Accept():
-                        if thread.position != len(items):
-                            break
+                case parser.Shift():
+                    value = current_token[1]
+                    if isinstance(value, runtime.Tree):
+                        child = Lazy.from_tree(value, printer)
+                    else:
+                        child = Text(value.start, value.end)
 
-                        result = None
-                        for r in thread.results:
-                            assert not isinstance(r, (StartGroup, StartIndent))
-                            result = cons(result, r)
-                        return result
+                    stack.append((action.state, child))
+                    input_index += 1
 
-                    case StartGroup():
-                        results.append(inst)
-                        thread.pc += 1
-
-                    case EndGroup():
-                        group_items = None
-                        while not isinstance(results[-1], StartGroup):
-                            item = typing.cast(Document, results.pop())
-                            group_items = cons(item, group_items)
-                        results.pop()
-                        results.append(Group(group_items))
-                        thread.pc += 1
-
-                    case NewLine():
-                        results.append(NewLine())
-                        thread.pc += 1
-
-                    case StartIndent():
-                        results.append(inst)
-                        thread.pc += 1
-
-                    case EndIndent(amount):
-                        indent_items = None
-                        while not isinstance(results[-1], StartIndent):
-                            item = typing.cast(Document, results.pop())
-                            indent_items = cons(item, indent_items)
-                        results.pop()
-                        results.append(Indent(amount, indent_items))
-                        thread.pc += 1
-
-                    case Split(left, right):
-                        new_thread = Matcher.ThreadState(
-                            pc=right,
-                            position=thread.position,
-                            results=list(thread.results),
-                            count=0,
-                        )
-                        threads.append(new_thread)
-                        thread.pc = left
-
-                    case Jump(where):
-                        thread.pc = where
-                        threads.append(thread)
-
-                    case _:
-                        typing.assert_never(inst)
-
-        return None
-
-    def format(self) -> str:
-        return "\n".join(self.format_lines())
-
-    def format_lines(self) -> list[str]:
-        lines = []
-        code_len = int(math.log10(len(self.code))) + 1
-        for i, inst in enumerate(self.code):
-            lines.append(f"{i: >{code_len}} {inst}")
-        return lines
-
-    @abc.abstractmethod
-    def format_into(self, lines: list[str], visited: dict["Matcher", int], indent: int = 0): ...
+                case parser.Error():
+                    raise Exception("How did I get a parse error here??")
 
 
 class PrettyMeta(parser.SyntaxMeta):
@@ -302,74 +184,86 @@ class Printer:
         return self._nonterminals[name]
 
     def compile_rule(self, rule: parser.NonTerminal) -> Matcher:
-        matcher = Matcher()
-        code = matcher.code
-        patcher: dict[str, int] = {}
+        generated_grammar: list[typing.Tuple[str, list[str]]] = []
+        visited: set[str] = set()
+        group_count = 0
+        indent_amounts: dict[str, int] = {}
+        done_newline = False
 
-        def compile_nonterminal(rule: parser.NonTerminal):
-            sub_start = patcher.get(rule.name)
-            if sub_start is not None:
-                code.append(Jump(sub_start))
-            else:
-                sub_start = len(code)
-                patcher[rule.name] = sub_start
-                tails = []
-                subs = list(rule.fn(self.grammar).flatten(with_metadata=True))
-                for sub in subs[:-1]:
-                    split_pos = len(code)
-                    code.append(Split(0, 0))
+        def compile_nonterminal(name: str, rule: parser.NonTerminal):
+            if name not in visited:
+                visited.add(name)
+                for production in rule.fn(self.grammar).flatten(with_metadata=True):
+                    trans_prod = compile_production(production)
+                    generated_grammar.append((name, trans_prod))
 
-                    compile_production(sub)
+        def compile_production(production: parser.FlattenedWithMetadata) -> list[str]:
+            nonlocal group_count
+            nonlocal indent_amounts
+            nonlocal done_newline
 
-                    tails.append(len(code))
-                    code.append(Jump(0))
-
-                    code[split_pos] = Split(sub_start + 1, len(code))
-                    sub_start = len(code)
-
-                compile_production(subs[-1])
-
-                for tail in tails:
-                    code[tail] = Jump(len(code))
-
-        def compile_production(production: parser.FlattenedWithMetadata):
+            result = []
             for item in production:
                 if isinstance(item, str):
-                    rule = self.lookup_nonterminal(item)
-                    if rule.transparent:
-                        # If it's transparent then we need to inline the pattern here.
-                        compile_nonterminal(rule)
+                    nt = self._nonterminals[item]
+                    if nt.transparent:
+                        # If it's transparent then we make a new set of
+                        # productions that covers the contents of the
+                        # transparent nonterminal.
+                        name = "xxx_" + nt.name
+                        compile_nonterminal(name, nt)
+                        result.append(name)
                     else:
-                        code.append(MatchNonTerminal(item))
+                        # Otherwise it's a "token" in our input, named
+                        # "tree_{whatever}".
+                        result.append(f"tree_{item}")
 
                 elif isinstance(item, parser.Terminal):
-                    name = item.name
-                    assert name is not None
-                    code.append(MatchTerminal(name))
+                    # If it's a terminal it will appear in our input as
+                    # "token_{whatever}".
+                    result.append(f"token_{item.name}")
 
                 else:
                     meta, children = item
+                    tx_children = compile_production(children)
 
-                    prettier = meta.get("prettier")
-                    if isinstance(prettier, PrettyMeta):
-                        if prettier.indent:
-                            code.append(StartIndent())
-                        if prettier.group:
-                            code.append(StartGroup())
+                    pretty = meta.get("prettier")
+                    if isinstance(pretty, PrettyMeta):
+                        if pretty.group:
+                            # Make a fake rule.
+                            rule_name = f"g_{group_count}"
+                            group_count += 1
+                            generated_grammar.append((rule_name, tx_children))
+                            tx_children = [rule_name]
 
-                    compile_production(children)
+                        if pretty.indent:
+                            rule_name = f"i_{len(indent_amounts)}"
+                            indent_amounts[rule_name] = pretty.indent
+                            generated_grammar.append((rule_name, tx_children))
+                            tx_children = [rule_name]
 
-                    if isinstance(prettier, PrettyMeta):
-                        if prettier.group:
-                            code.append(EndGroup())
-                        if prettier.indent:
-                            code.append(EndIndent(prettier.indent))
-                        if prettier.newline:
-                            code.append(NewLine())
+                        if pretty.newline:
+                            if not done_newline:
+                                generated_grammar.append(("newline", []))
+                                done_newline = True
+                            tx_children.append("newline")
 
-        compile_nonterminal(rule)
-        code.append(Accept())
-        return matcher
+                    # If it turned out to have formatting meta then we will
+                    # have replaced or augmented the translated children
+                    # appropriately. Otherwise, if it's highlighting meta or
+                    # something else, we'll have ignored it and the
+                    # translated children should just be inserted inline.
+                    result.extend(tx_children)
+
+            return result
+
+        compile_nonterminal(rule.name, rule)
+        gen = self.grammar._generator(rule.name, generated_grammar)
+        parse_table = gen.gen_table()
+
+        # print(parse_table.format())
+
+        return Matcher(parse_table, indent_amounts)
 
     def rule_to_matcher(self, rule: parser.NonTerminal) -> Matcher:
         result = self._matchers.get(rule.name)
@@ -385,15 +279,11 @@ class Printer:
 
         rule = self.lookup_nonterminal(name)
         matcher = self.rule_to_matcher(rule)
-        print(f"--------")
-        print(f"Matching with:\n{matcher.format()}")
         m = matcher.match(self, list(tree.children))
-        print(f"--------")
         if m is None:
             raise ValueError(
-                f"Could not match a valid tree for {tree.name} with {len(tree.children)} children:\n{tree.format()}\nMatcher:\n{matcher.format()}"
+                f"Could not match a valid tree for {tree.name} with {len(tree.children)} children:\n{tree.format()}"
             )
-        # return m
         return resolve_document(m)
 
     def format_tree(self, tree: runtime.Tree) -> str:
