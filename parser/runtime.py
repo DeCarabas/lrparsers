@@ -22,6 +22,29 @@ class Tree:
     end: int
     children: typing.Tuple["Tree | TokenValue", ...]
 
+    def format_lines(self, source: str | None = None) -> list[str]:
+        lines = []
+
+        def format_node(node: Tree | TokenValue, indent: int):
+            match node:
+                case Tree(name=name, start=start, end=end, children=children):
+                    lines.append((" " * indent) + f"{name or '???'} [{start}, {end})")
+                    for child in children:
+                        format_node(child, indent + 2)
+
+                case TokenValue(kind=kind, start=start, end=end):
+                    if source is not None:
+                        value = f":'{source[start:end]}'"
+                    else:
+                        value = ""
+                    lines.append((" " * indent) + f"{kind}{value} [{start}, {end})")
+
+        format_node(self, 0)
+        return lines
+
+    def format(self, source: str | None = None) -> str:
+        return "\n".join(self.format_lines(source))
+
 
 @dataclass
 class ParseError:
@@ -278,13 +301,15 @@ class TokenStream(typing.Protocol):
         ...
 
 
+# TODO: This runtime API sucks; the TokenStream is nice and all but I should
+#       also be able to have a function that takes a string and produces a
+#       tree directly, with caching intermediates for codegen and whatnot.
+
+
 class Parser:
-    # Our stack is a stack of tuples, where the first entry is the state
-    # number and the second entry is the 'value' that was generated when the
-    # state was pushed.
     table: parser.ParseTable
 
-    def __init__(self, table):
+    def __init__(self, table: parser.ParseTable):
         self.table = table
 
     def parse(self, tokens: TokenStream) -> typing.Tuple[Tree | None, list[str]]:
@@ -301,6 +326,9 @@ class Parser:
         input = input + [TokenValue(kind="$", start=eof, end=eof)]
         input_index = 0
 
+        # Our stack is a stack of tuples, where the first entry is the state
+        # number and the second entry is the 'value' that was generated when
+        # the state was pushed.
         stack: ParseStack = [(0, None)]
         result: Tree | None = None
         errors: list[ParseError] = []
