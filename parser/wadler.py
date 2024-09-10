@@ -109,14 +109,6 @@ class Matcher:
             current_state = stack[-1][0]
             action = table.actions[current_state].get(current_token[0], parser.Error())
 
-            # print(
-            #     "{stack: <30} {input: <15} {action: <5}".format(
-            #         stack=repr([s[0] for s in stack[-5:]]),
-            #         input=current_token[0],
-            #         action=repr(action),
-            #     )
-            # )
-
             match action:
                 case parser.Accept():
                     return stack[-1][1]
@@ -164,13 +156,9 @@ class Matcher:
                     raise Exception("How did I get a parse error here??")
 
 
-class PrettyMeta(parser.SyntaxMeta):
-    newline: bool
-    indent: int | None
-    group: bool
-
-
 class Printer:
+    # TODO: Pre-generate the matcher tables for a grammar, to make it
+    #       possible to do codegen in other languages.
     grammar: parser.Grammar
     _matchers: dict[str, Matcher]
     _nonterminals: dict[str, parser.NonTerminal]
@@ -227,8 +215,8 @@ class Printer:
                     meta, children = item
                     tx_children = compile_production(children)
 
-                    pretty = meta.get("prettier")
-                    if isinstance(pretty, PrettyMeta):
+                    pretty = meta.get("format")
+                    if isinstance(pretty, parser.FormatMeta):
                         if pretty.group:
                             # Make a fake rule.
                             rule_name = f"g_{group_count}"
@@ -260,8 +248,6 @@ class Printer:
         compile_nonterminal(rule.name, rule)
         gen = self.grammar._generator(rule.name, generated_grammar)
         parse_table = gen.gen_table()
-
-        # print(parse_table.format())
 
         return Matcher(parse_table, indent_amounts)
 

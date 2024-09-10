@@ -1740,6 +1740,12 @@ class NothingRule(Rule):
 Nothing = NothingRule()
 
 
+class SyntaxMeta:
+    """A maybe base class for annotations to a rule."""
+
+    pass
+
+
 class MetadataRule(Rule):
     def __init__(self, rule: Rule, metadata: dict[str, typing.Any]):
         self.rule = rule
@@ -1783,18 +1789,6 @@ def opt(*args: Rule) -> Rule:
 
 def mark(rule: Rule, **kwargs) -> Rule:
     return MetadataRule(rule, kwargs)
-
-
-def group(*rules: Rule) -> Rule:
-    return seq(*rules)
-
-
-def indent(*rules: Rule) -> Rule:
-    return seq(*rules)
-
-
-def newline() -> Rule:
-    return Nothing
 
 
 @typing.overload
@@ -2366,22 +2360,9 @@ def dump_lexer_table(table: LexerTable, name: str = "lexer.dot"):
         f.write("}\n")
 
 
-# NOTE: We have rich metadata system man, wow, how cool are we?
-#
-#       The whole point of this stuff here is to allow automatic
-#       generation/maintenance of syntax coloring for editors. And maybe some
-#       other stuff? This is *extremely provisional*, I'm not even sure it
-#       makes sense yet. Tree sitter works differently, for example, and it's
-#       not clear at all what we want to generate for any particular editor.
-#
-#       This here might be enough to produce extremely basic TextMate
-#       grammars but anything more complicated will want tree patterns
-#       anyway, and we can only do tree patterns by influencing the grammar.
-#
-#       Here's the info on textmate grammars:
-#           https://macromates.com/manual/en/language_grammars
-class SyntaxMeta:
-    pass
+###############################################################################
+# Highlighting metadata support
+###############################################################################
 
 
 class HighlightMeta(SyntaxMeta):
@@ -2689,6 +2670,33 @@ class _Highlight:
 
 
 highlight = _Highlight()
+
+
+###############################################################################
+# Pretty-printing metadata support
+###############################################################################
+
+
+@dataclasses.dataclass
+class FormatMeta(SyntaxMeta):
+    newline: bool = False
+    indent: int | None = None
+    group: bool = False
+
+
+def group(*rules: Rule) -> Rule:
+    return mark(seq(*rules), format=FormatMeta(group=True))
+
+
+def indent(*rules: Rule, amount: int | None = None) -> Rule:
+    if amount is None:
+        amount = 4
+    return mark(seq(*rules), format=FormatMeta(indent=amount))
+
+
+def newline() -> Rule:
+    return mark(Nothing, format=FormatMeta(newline=True))
+
 
 ###############################################################################
 # Finally, the base class for grammars

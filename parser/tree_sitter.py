@@ -134,7 +134,7 @@ def apply_precedence(js: str, name: str, grammar: parser.Grammar) -> str:
     return js
 
 
-def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
+def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str | None:
     method = getattr(rule, "convert_to_tree_sitter", None)
     if method is not None:
         return method(grammar)
@@ -146,7 +146,7 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
         return f"$['{target_name}']"
 
     elif isinstance(rule, parser.AlternativeRule):
-        final = []
+        final: list[str] = []
         queue = []
         has_nothing = False
         queue.append(rule)
@@ -155,15 +155,17 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
             if isinstance(part, parser.AlternativeRule):
                 queue.append(part.right)
                 queue.append(part.left)
-            elif isinstance(part, parser.NothingRule):
-                has_nothing = True
             else:
-                final.append(part)
+                converted = convert_to_tree_sitter(part, grammar)
+                if converted is None:
+                    has_nothing = True
+                else:
+                    final.append(converted)
 
         if len(final) == 0:
             raise Exception("Unsupported rule: empty alternative")
 
-        result = ", ".join([convert_to_tree_sitter(r, grammar) for r in final])
+        result = ", ".join(final)
         if len(final) > 1:
             result = f"choice({result})"
         if has_nothing:
@@ -172,6 +174,7 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
 
     elif isinstance(rule, parser.SequenceRule):
         final = []
+        pieces = []
         queue = []
         queue.append(rule)
         while len(queue) > 0:
@@ -179,10 +182,11 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
             if isinstance(part, parser.SequenceRule):
                 queue.append(part.second)
                 queue.append(part.first)
-            elif isinstance(part, parser.NothingRule):
-                pass
             else:
-                final.append(part)
+                piece = convert_to_tree_sitter(part, grammar)
+                if piece is not None:
+                    pieces.append(piece)
+                    final.append(part)
 
         if len(final) == 0:
             raise Exception("Unsupported rule: empty sequence")
@@ -196,8 +200,6 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
         #
         #   https://github.com/tree-sitter/tree-sitter/issues/372
         #
-        pieces = [convert_to_tree_sitter(r, grammar) for r in final]
-
         def make_seq(pieces: list[str]):
             if len(pieces) == 1:
                 return pieces[0]
@@ -223,10 +225,16 @@ def convert_to_tree_sitter(rule: parser.Rule, grammar: parser.Grammar) -> str:
 
     elif isinstance(rule, parser.MetadataRule):
         result = convert_to_tree_sitter(rule.rule, grammar)
+        if result is None:
+            return None
+
         field = rule.metadata.get("field")
         if field is not None:
             result = f"field('{field}', {result})"
         return result
+
+    elif isinstance(rule, parser.NothingRule):
+        return None
 
     else:
         raise ValueError(f"Rule {rule} not supported for tree-sitter")
@@ -257,6 +265,8 @@ def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
 
             body = rule.fn(grammar)
             rule_definition = convert_to_tree_sitter(body, grammar)
+            if rule_definition is None:
+                raise Exception(f"Tree-sitter does not support the empty rule {rule_name}")
             rule_definition = apply_precedence(rule_definition, rule.name, grammar)
 
             f.write(f"    '{rule_name}': $ => {rule_definition},")
