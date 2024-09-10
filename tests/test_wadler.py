@@ -1,6 +1,6 @@
 import typing
 
-from parser.parser import Grammar, Re, Terminal, rule, opt
+from parser.parser import Grammar, Re, Terminal, rule, opt, group, newline, alt
 
 import parser.runtime as runtime
 import parser.wadler as wadler
@@ -29,23 +29,29 @@ class JsonGrammar(Grammar):
 
     @rule
     def object(self):
-        return self.LCURLY + opt(self._object_pairs) + self.RCURLY
+        return group(self.LCURLY + opt(self._object_pairs) + self.RCURLY)
 
     @rule
     def _object_pairs(self):
-        return self.object_pair | (self._object_pairs + self.COMMA + self.object_pair)
+        return alt(
+            self.object_pair + newline(),
+            self.object_pair + self.COMMA + newline() + self._object_pairs,
+        )
 
     @rule
     def object_pair(self):
-        return self.STRING + self.COLON + self.value
+        return group(self.STRING + self.COLON + self.value)
 
     @rule
     def array(self):
-        return self.LSQUARE + opt(self._array_items) + self.RSQUARE
+        return group(self.LSQUARE + opt(self._array_items) + self.RSQUARE)
 
     @rule
     def _array_items(self):
-        return self.value | (self._array_items + self.COMMA + self.value)
+        return alt(
+            self.value + newline(),
+            self.value + self.COMMA + newline() + self._array_items,
+        )
 
     BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
     LCURLY = Terminal("{")
@@ -89,7 +95,7 @@ JSON_PARSER = runtime.Parser(JSON_TABLE)
 def flatten_document(doc: wadler.Document, src: str) -> list:
     match doc:
         case wadler.NewLine():
-            return ["\n"]
+            return ["<newline>"]
         case wadler.Indent():
             return [f"<indent {doc.amount}>", flatten_document(doc.doc, src)]
         case wadler.Text(start, end):
@@ -117,21 +123,28 @@ def test_basic_printer():
     doc = flatten_document(printer.convert_tree_to_document(tree), text)
 
     assert doc == [
-        "{",
-        '"a"',
-        ":",
-        "true",
-        ",",
-        '"b"',
-        ":",
-        "[",
-        "1",
-        ",",
-        "2",
-        ",",
-        "3",
-        "]",
-        "}",
+        [
+            "{",
+            ['"a"', ":", "true"],
+            ",",
+            "<newline>",
+            [
+                '"b"',
+                ":",
+                [
+                    "[",
+                    "1",
+                    ",",
+                    "<newline>",
+                    "2",
+                    ",",
+                    "<newline>",
+                    "3",
+                    "<newline>",
+                    "]",
+                ],
+            ],
+            "<newline>",
+            "}",
+        ]
     ]
-
-    pass
