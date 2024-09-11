@@ -57,7 +57,7 @@ class JsonGrammar(Grammar):
     LCURLY = Terminal("{")
     RCURLY = Terminal("}")
     COMMA = Terminal(",")
-    COLON = Terminal(":")
+    COLON = Terminal(":", format_follow=" ")
     LSQUARE = Terminal("[")
     RSQUARE = Terminal("]")
     TRUE = Terminal("true")
@@ -164,8 +164,8 @@ def test_layout_basic():
         result
         == """
 {
- "a":true,
- "b":[
+ "a": true,
+ "b": [
   1,
   2,
   3

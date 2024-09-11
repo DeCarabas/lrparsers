@@ -37,6 +37,11 @@ class Text:
 
 
 @dataclasses.dataclass(frozen=True)
+class Literal:
+    text: str
+
+
+@dataclasses.dataclass(frozen=True)
 class Group:
     child: "Document"
 
@@ -55,7 +60,7 @@ class Lazy:
         return Lazy(lambda: printer.convert_tree_to_document(tree))
 
 
-Document = None | Text | NewLine | Cons | Indent | Group | Lazy
+Document = None | Text | Literal | NewLine | Cons | Indent | Group | Lazy
 
 
 class DocumentLayout:
@@ -111,6 +116,9 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                 case Text(start, end):
                     remaining -= end - start
 
+                case Literal(text):
+                    remaining -= len(text)
+
                 case NewLine():
                     if chunk.flat:
                         # These are newlines that have been rendered flat,
@@ -162,6 +170,10 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
             case Text(start, end):
                 output.append((start, end))
                 column += end - start
+
+            case Literal(text):
+                output.append(text)
+                column += len(text)
 
             case NewLine():
                 if chunk.flat:
@@ -226,10 +238,17 @@ def child_to_name(child: runtime.Tree | runtime.TokenValue) -> str:
 class Matcher:
     table: parser.ParseTable
     indent_amounts: dict[str, int]
+    text_follow: dict[str, str]
 
-    def __init__(self, table: parser.ParseTable, indent_amounts):
+    def __init__(
+        self,
+        table: parser.ParseTable,
+        indent_amounts: dict[str, int],
+        text_follow: dict[str, str],
+    ):
         self.table = table
         self.indent_amounts = indent_amounts
+        self.text_follow = text_follow
 
     def match(self, printer: "Printer", items: list[runtime.Tree | runtime.TokenValue]) -> Document:
         stack: list[tuple[int, Document]] = [(0, None)]
@@ -272,7 +291,7 @@ class Matcher:
                         child = cons(NewLine(), child)
 
                     else:
-                        pass  # ???
+                        pass  # Reducing a transparent rule probably.
 
                     goto = self.table.gotos[stack[-1][0]].get(name)
                     assert goto is not None
@@ -280,10 +299,18 @@ class Matcher:
 
                 case parser.Shift():
                     value = current_token[1]
+
+                    follow = None
                     if isinstance(value, runtime.Tree):
                         child = Lazy.from_tree(value, printer)
+                        if value.name:
+                            follow = self.text_follow.get(value.name)
                     else:
                         child = Text(value.start, value.end)
+                        follow = self.text_follow.get(value.kind)
+
+                    if follow is not None:
+                        child = cons(child, Literal(follow))
 
                     stack.append((action.state, child))
                     input_index += 1
@@ -296,6 +323,7 @@ class Printer:
     # TODO: Pre-generate the matcher tables for a grammar, to make it
     #       possible to do codegen in other languages.
     grammar: parser.Grammar
+    _text_follow: dict[str, str]
     _matchers: dict[str, Matcher]
     _nonterminals: dict[str, parser.NonTerminal]
 
@@ -303,6 +331,13 @@ class Printer:
         self.grammar = grammar
         self._nonterminals = {nt.name: nt for nt in grammar.non_terminals()}
         self._matchers = {}
+
+        text_follow = {}
+        for terminal in self.grammar.terminals():
+            follow = terminal.meta.get("format_follow")
+            if isinstance(follow, str):
+                text_follow[terminal.name] = follow
+        self._text_follow = text_follow
 
     def lookup_nonterminal(self, name: str) -> parser.NonTerminal:
         return self._nonterminals[name]
@@ -385,7 +420,7 @@ class Printer:
         gen = self.grammar._generator(rule.name, generated_grammar)
         parse_table = gen.gen_table()
 
-        return Matcher(parse_table, indent_amounts)
+        return Matcher(parse_table, indent_amounts, self._text_follow)
 
     def rule_to_matcher(self, rule: parser.NonTerminal) -> Matcher:
         result = self._matchers.get(rule.name)
