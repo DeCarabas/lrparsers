@@ -1,6 +1,6 @@
 import typing
 
-from parser.parser import Grammar, Re, Terminal, rule, opt, group, newline, alt
+from parser.parser import Grammar, Re, Terminal, rule, opt, group, newline, alt, indent
 
 import parser.runtime as runtime
 import parser.wadler as wadler
@@ -29,13 +29,13 @@ class JsonGrammar(Grammar):
 
     @rule
     def object(self):
-        return group(self.LCURLY + opt(self._object_pairs) + self.RCURLY)
+        return group(self.LCURLY + opt(indent(self._object_pairs)) + newline() + self.RCURLY)
 
     @rule
     def _object_pairs(self):
         return alt(
-            self.object_pair + newline(),
-            self.object_pair + self.COMMA + newline() + self._object_pairs,
+            newline() + self.object_pair,
+            newline() + self.object_pair + self.COMMA + self._object_pairs,
         )
 
     @rule
@@ -44,13 +44,13 @@ class JsonGrammar(Grammar):
 
     @rule
     def array(self):
-        return group(self.LSQUARE + opt(self._array_items) + self.RSQUARE)
+        return group(self.LSQUARE + opt(indent(self._array_items)) + newline() + self.RSQUARE)
 
     @rule
     def _array_items(self):
         return alt(
-            self.value + newline(),
-            self.value + self.COMMA + newline() + self._array_items,
+            newline() + self.value,
+            newline() + self.value + self.COMMA + self._array_items,
         )
 
     BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
@@ -112,7 +112,7 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
             typing.assert_never(doc)
 
 
-def test_basic_printer():
+def test_convert_tree_to_document():
     text = '{"a": true, "b":[1,2,3]}'
     tokens = runtime.GenericTokenStream(text, JSON_LEXER)
     tree, errors = JSON_PARSER.parse(tokens)
@@ -148,3 +148,28 @@ def test_basic_printer():
             "}",
         ]
     ]
+
+
+def test_layout_basic():
+    text = '{"a": true, "b":[1,2,3]}'
+    tokens = runtime.GenericTokenStream(text, JSON_LEXER)
+    tree, errors = JSON_PARSER.parse(tokens)
+    assert [] == errors
+    assert tree is not None
+
+    printer = wadler.Printer(JSON)
+    result = printer.format_tree(tree, 10).apply_to_source(text)
+
+    assert (
+        result
+        == """
+{
+ "a":true,
+ "b":[
+  1,
+  2,
+  3
+ ]
+}
+""".strip()
+    )

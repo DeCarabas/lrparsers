@@ -2673,29 +2673,48 @@ highlight = _Highlight()
 
 
 ###############################################################################
-# Pretty-printing metadata support
+# Formatting (pretty-printing) metadata support
 ###############################################################################
 
 
 @dataclasses.dataclass
 class FormatMeta(SyntaxMeta):
-    newline: bool = False
+    newline: str | None = None
     indent: int | None = None
     group: bool = False
 
 
 def group(*rules: Rule) -> Rule:
+    """Indicates that the text should be put on a single line if possible
+    during pretty-printing. Has no effect on parsing.
+    """
     return mark(seq(*rules), format=FormatMeta(group=True))
 
 
 def indent(*rules: Rule, amount: int | None = None) -> Rule:
+    """Indicates a new level indentation during pretty-printing. The provided
+    rules are otherwise treated as if they were in a sequence. This rule has
+    no effect on parsing otherwise.
+
+    The specified amount is the number of "indentation" values to indent the
+    lines with. It defaults to 1.
+    """
     if amount is None:
-        amount = 4
+        amount = 1
     return mark(seq(*rules), format=FormatMeta(indent=amount))
 
 
-def newline() -> Rule:
-    return mark(Nothing, format=FormatMeta(newline=True))
+def newline(text: str | None = None) -> Rule:
+    """Indicate that, during pretty-printing, the line can be broken here. Has
+    no effect parsing.
+
+    If text is provided, the text will be inserted before the line break. This
+    allows for e.g. trailing commas in lists and whatnot to make things look
+    prettier, when supported.
+    """
+    if text is None:
+        text = ""
+    return mark(Nothing, format=FormatMeta(newline=text))
 
 
 ###############################################################################

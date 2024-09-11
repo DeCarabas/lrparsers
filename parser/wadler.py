@@ -58,6 +58,145 @@ class Lazy:
 Document = None | Text | NewLine | Cons | Indent | Group | Lazy
 
 
+class DocumentLayout:
+    segments: list[str | tuple[int, int]]
+
+    def __init__(self, segments):
+        self.segments = segments
+
+    def apply_to_source(self, original: str) -> str:
+        result = ""
+        for segment in self.segments:
+            if isinstance(segment, str):
+                result += segment
+            else:
+                start, end = segment
+                result += original[start:end]
+
+        return result
+
+
+def layout_document(doc: Document, width: int) -> DocumentLayout:
+    """Lay out a document to fit within the given width.
+
+    The result of this function is a layout which can trivially be converted
+    into a string given the original document.
+    """
+
+    @dataclasses.dataclass
+    class Chunk:
+        doc: Document
+        indent: int
+        flat: bool
+
+        def with_document(self, doc: Document, and_indent: int = 0) -> "Chunk":
+            return Chunk(doc=doc, indent=self.indent + and_indent, flat=self.flat)
+
+    column = 0
+    chunks: list[Chunk] = [Chunk(doc=doc, indent=0, flat=False)]
+
+    def fits(chunk: Chunk) -> bool:
+        remaining = width - column
+        if remaining <= 0:
+            return False
+
+        stack = list(chunks)
+        stack.append(chunk)
+        while len(stack) > 0:
+            chunk = stack.pop()
+            match chunk.doc:
+                case None:
+                    pass
+
+                case Text(start, end):
+                    remaining -= end - start
+
+                case NewLine():
+                    if chunk.flat:
+                        # These are newlines that have been rendered flat,
+                        # they are spaces I guess? TODO: Consider alternate
+                        # forms, something that "goes here instead of
+                        # newline", like maybe the empty string or... what?
+                        remaining -= 1
+                    else:
+                        # These are newlines that are real, so it must have
+                        # all fit.
+                        return True
+
+                case Cons(left, right):
+                    stack.append(chunk.with_document(right))
+                    stack.append(chunk.with_document(left))
+
+                case Lazy():
+                    stack.append(chunk.with_document(chunk.doc.resolve()))
+
+                case Indent(amount, child):
+                    stack.append(chunk.with_document(child, and_indent=amount))
+
+                case Group(child):
+                    # The difference between this approach and Justin's twist
+                    # is that we consider the flat variable in Newline(),
+                    # above, rather than here in Group. This makes us more
+                    # like Wadler's original formulation, I guess. The
+                    # grouping is an implicit transform over alternatives
+                    # represented by newline. (If we have other kinds of
+                    # alternatives we'll have to work those out elsewhere as
+                    # well.)
+                    stack.append(chunk.with_document(child))
+
+                case _:
+                    typing.assert_never(chunk.doc)
+
+            if remaining < 0:
+                return False
+
+        return True  # Everything must fit, so great!
+
+    output: list[str | tuple[int, int]] = []
+    while len(chunks) > 0:
+        chunk = chunks.pop()
+        match chunk.doc:
+            case None:
+                pass
+
+            case Text(start, end):
+                output.append((start, end))
+                column += end - start
+
+            case NewLine():
+                if chunk.flat:
+                    # TODO: Custom newline flat mode. See also the
+                    # corresponding comment in the "fits" function.
+                    output.append(" ")
+                    column += 1
+                else:
+                    # TODO: Custom newline expansion, custom indent segments.
+                    output.append("\n" + (chunk.indent * " "))
+                    column = chunk.indent
+
+            case Cons(left, right):
+                chunks.append(chunk.with_document(right))
+                chunks.append(chunk.with_document(left))
+
+            case Indent(amount, doc):
+                chunks.append(chunk.with_document(doc, and_indent=amount))
+
+            case Lazy():
+                chunks.append(chunk.with_document(chunk.doc.resolve()))
+
+            case Group(child):
+                candidate = Chunk(doc=child, indent=chunk.indent, flat=True)
+                if chunk.flat or fits(candidate):
+                    chunks.append(candidate)
+                else:
+                    chunks.append(Chunk(doc=child, indent=chunk.indent, flat=False))
+
+            case _:
+                typing.assert_never(chunk)
+
+    return DocumentLayout(output)
+
+
 def resolve_document(doc: Document) -> Document:
     match doc:
         case Cons(left, right):
@@ -75,12 +214,9 @@ def resolve_document(doc: Document) -> Document:
             return doc
 
 
-def layout_document(doc: Document) -> typing.Generator[str, None, None]:
-    del doc
-    raise NotImplementedError()
-
-
 def child_to_name(child: runtime.Tree | runtime.TokenValue) -> str:
+    # TODO: RECONSIDER THE EXISTENCE OF THIS FUNCTION
+    #       The naming condition is important but
     if isinstance(child, runtime.Tree):
         return f"tree_{child.name}"
     else:
@@ -230,7 +366,7 @@ class Printer:
                             generated_grammar.append((rule_name, tx_children))
                             tx_children = [rule_name]
 
-                        if pretty.newline:
+                        if pretty.newline is not None:
                             if not done_newline:
                                 generated_grammar.append(("newline", []))
                                 done_newline = True
@@ -272,6 +408,6 @@ class Printer:
             )
         return resolve_document(m)
 
-    def format_tree(self, tree: runtime.Tree) -> str:
+    def format_tree(self, tree: runtime.Tree, width: int) -> DocumentLayout:
         doc = self.convert_tree_to_document(tree)
-        return next(layout_document(doc))
+        return layout_document(doc, width)
