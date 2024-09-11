@@ -97,9 +97,11 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
         case wadler.NewLine():
             return ["<newline>"]
         case wadler.Indent():
-            return [f"<indent {doc.amount}>", flatten_document(doc.doc, src)]
+            return [[f"<indent {doc.amount}>", flatten_document(doc.doc, src)]]
         case wadler.Text(start, end):
             return [src[start:end]]
+        case wadler.Literal(text):
+            return [text]
         case wadler.Group():
             return [flatten_document(doc.child, src)]
         case wadler.Lazy():
@@ -125,23 +127,36 @@ def test_convert_tree_to_document():
     assert doc == [
         [
             "{",
-            ['"a"', ":", "true"],
-            ",",
-            "<newline>",
             [
-                '"b"',
-                ":",
+                "<indent 1>",
                 [
-                    "[",
-                    "1",
+                    "<newline>",
+                    ['"a"', ":", " ", "true"],
                     ",",
                     "<newline>",
-                    "2",
-                    ",",
-                    "<newline>",
-                    "3",
-                    "<newline>",
-                    "]",
+                    [
+                        '"b"',
+                        ":",
+                        " ",
+                        [
+                            "[",
+                            [
+                                "<indent 1>",
+                                [
+                                    "<newline>",
+                                    "1",
+                                    ",",
+                                    "<newline>",
+                                    "2",
+                                    ",",
+                                    "<newline>",
+                                    "3",
+                                ],
+                            ],
+                            "<newline>",
+                            "]",
+                        ],
+                    ],
                 ],
             ],
             "<newline>",
