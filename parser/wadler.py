@@ -21,7 +21,7 @@ def cons(left: "Document", right: "Document") -> "Document":
 
 @dataclasses.dataclass(frozen=True)
 class NewLine:
-    pass
+    replace: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -119,13 +119,9 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                 case Literal(text):
                     remaining -= len(text)
 
-                case NewLine():
+                case NewLine(replace):
                     if chunk.flat:
-                        # These are newlines that have been rendered flat,
-                        # they are spaces I guess? TODO: Consider alternate
-                        # forms, something that "goes here instead of
-                        # newline", like maybe the empty string or... what?
-                        remaining -= 1
+                        remaining -= len(replace)
                     else:
                         # These are newlines that are real, so it must have
                         # all fit.
@@ -175,12 +171,10 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                 output.append(text)
                 column += len(text)
 
-            case NewLine():
+            case NewLine(replace):
                 if chunk.flat:
-                    # TODO: Custom newline flat mode. See also the
-                    # corresponding comment in the "fits" function.
-                    output.append(" ")
-                    column += 1
+                    output.append(replace)
+                    column += len(replace)
                 else:
                     # TODO: Custom newline expansion, custom indent segments.
                     output.append("\n" + (chunk.indent * " "))
@@ -220,7 +214,7 @@ def resolve_document(doc: Document) -> Document:
                 return doc
 
         case Lazy(_):
-            return doc.resolve()
+            return resolve_document(doc.resolve())
 
         case _:
             return doc
@@ -239,16 +233,19 @@ class Matcher:
     table: parser.ParseTable
     indent_amounts: dict[str, int]
     text_follow: dict[str, str]
+    newline_replace: dict[str, str]
 
     def __init__(
         self,
         table: parser.ParseTable,
         indent_amounts: dict[str, int],
         text_follow: dict[str, str],
+        newline_replace: dict[str, str],
     ):
         self.table = table
         self.indent_amounts = indent_amounts
         self.text_follow = text_follow
+        self.newline_replace = newline_replace
 
     def match(self, printer: "Printer", items: list[runtime.Tree | runtime.TokenValue]) -> Document:
         stack: list[tuple[int, Document]] = [(0, None)]
@@ -294,15 +291,17 @@ class Matcher:
                         child = Indent(amount, child)
 
                     elif name[0] == "n":
-                        child = cons(child, NewLine())
+                        replace = self.newline_replace[name]
+                        print(f"!!!! {name} -> {repr(replace)}")
+                        child = cons(child, NewLine(replace))
 
                     elif name[0] == "p":
-                        child = cons(NewLine(), child)
+                        child = cons(NewLine(""), child)
 
                     else:
                         pass  # Reducing a transparent rule probably.
 
-                    goto = self.table.gotos[stack[-1][0]].get(name)
+                    goto = table.gotos[stack[-1][0]].get(name)
                     assert goto is not None
                     stack.append((goto, child))
 
@@ -315,7 +314,27 @@ class Matcher:
                         if value.name:
                             follow = self.text_follow.get(value.name)
                     else:
+                        # Here is where we consider ephemera. We can say: if
+                        # the trailing ephemera includes a blank, then we
+                        # insert a blank here. We do not want to double-count
+                        # blanks, maybe we can have some kind of a notion of
+                        # what is a blank.
+                        #
+                        # A wierd digression: one thing that's weird is that
+                        # blank spaces are always kinda culturally assumed?
+                        # But the computer always has to be taught. In hand-
+                        # printers, the spaces are added by a person and the
+                        # person doesn't think twice. We are in the unique
+                        # position of "generalizing" the blank space for
+                        # formatting purposes.
                         child = Text(value.start, value.end)
+
+                        for trivia in value.pre_trivia:
+                            pass
+
+                        for trivia in value.post_trivia:
+                            pass
+
                         follow = self.text_follow.get(value.kind)
 
                     if follow is not None:
@@ -357,6 +376,7 @@ class Printer:
         group_count = 0
         indent_amounts: dict[str, int] = {}
         done_newline = False
+        newline_map: dict[str, str] = {}
 
         def compile_nonterminal(name: str, rule: parser.NonTerminal):
             if name not in visited:
@@ -411,10 +431,13 @@ class Printer:
                             tx_children = [rule_name]
 
                         if pretty.newline is not None:
-                            if not done_newline:
-                                generated_grammar.append(("newline", []))
-                                done_newline = True
-                            tx_children.append("newline")
+                            newline_rule_name = newline_map.get(pretty.newline)
+                            if newline_rule_name is None:
+                                newline_rule_name = f"n{len(newline_map)}"
+                                newline_map[pretty.newline] = newline_rule_name
+                                generated_grammar.append((newline_rule_name, []))
+
+                            tx_children.append(newline_rule_name)
 
                     # If it turned out to have formatting meta then we will
                     # have replaced or augmented the translated children
@@ -429,7 +452,13 @@ class Printer:
         gen = self.grammar._generator(rule.name, generated_grammar)
         parse_table = gen.gen_table()
 
-        return Matcher(parse_table, indent_amounts, self._text_follow)
+        newline_replace = {v: k for k, v in newline_map.items()}
+        return Matcher(
+            parse_table,
+            indent_amounts,
+            self._text_follow,
+            newline_replace,
+        )
 
     def rule_to_matcher(self, rule: parser.NonTerminal) -> Matcher:
         result = self._matchers.get(rule.name)

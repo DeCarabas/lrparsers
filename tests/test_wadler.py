@@ -29,35 +29,42 @@ class JsonGrammar(Grammar):
 
     @rule
     def object(self):
-        return group(self.LCURLY + opt(indent(self._object_pairs)) + newline() + self.RCURLY)
+        return group(
+            self.LCURLY + opt(indent(newline() + self._object_pairs)) + newline() + self.RCURLY
+        )
 
     @rule
     def _object_pairs(self):
         return alt(
-            newline() + self.object_pair,
-            newline() + self.object_pair + self.COMMA + self._object_pairs,
+            self.object_pair,
+            self.object_pair + self.COMMA + newline(" ") + self._object_pairs,
         )
 
     @rule
     def object_pair(self):
-        return group(self.STRING + self.COLON + self.value)
+        return group(self.STRING + self.COLON + indent(newline(" ") + self.value))
 
     @rule
     def array(self):
-        return group(self.LSQUARE + opt(indent(self._array_items)) + newline() + self.RSQUARE)
+        return group(
+            self.LSQUARE + opt(indent(newline() + self._array_items)) + newline() + self.RSQUARE
+        )
 
     @rule
     def _array_items(self):
         return alt(
-            newline() + self.value,
-            newline() + self.value + self.COMMA + self._array_items,
+            self.value,
+            self.value + self.COMMA + newline(" ") + self._array_items,
         )
 
-    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+    BLANKS = Terminal(
+        Re.set(" ", "\t", "\r", "\n").plus(),
+        is_format_blank=True,
+    )
     LCURLY = Terminal("{")
     RCURLY = Terminal("}")
     COMMA = Terminal(",")
-    COLON = Terminal(":", format_follow=" ")
+    COLON = Terminal(":")
     LSQUARE = Terminal("[")
     RSQUARE = Terminal("]")
     TRUE = Terminal("true")
@@ -94,8 +101,8 @@ JSON_PARSER = runtime.Parser(JSON_TABLE)
 
 def flatten_document(doc: wadler.Document, src: str) -> list:
     match doc:
-        case wadler.NewLine():
-            return ["<newline>"]
+        case wadler.NewLine(replace):
+            return [f"<newline {repr(replace)}>"]
         case wadler.Indent():
             return [[f"<indent {doc.amount}>", flatten_document(doc.doc, src)]]
         case wadler.Text(start, end):
@@ -130,61 +137,70 @@ def test_convert_tree_to_document():
             [
                 "<indent 1>",
                 [
-                    "<newline>",
-                    ['"a"', ":", " ", "true"],
+                    "<newline ''>",
+                    [
+                        '"a"',
+                        ":",
+                        [
+                            "<indent 1>",
+                            ["<newline ' '>", "true"],
+                        ],
+                    ],
                     ",",
-                    "<newline>",
+                    "<newline ' '>",
                     [
                         '"b"',
                         ":",
-                        " ",
                         [
-                            "[",
+                            "<indent 1>",
                             [
-                                "<indent 1>",
+                                "<newline ' '>",
                                 [
-                                    "<newline>",
-                                    "1",
-                                    ",",
-                                    "<newline>",
-                                    "2",
-                                    ",",
-                                    "<newline>",
-                                    "3",
+                                    "[",
+                                    [
+                                        "<indent 1>",
+                                        [
+                                            "<newline ''>",
+                                            "1",
+                                            ",",
+                                            "<newline ' '>",
+                                            "2",
+                                            ",",
+                                            "<newline ' '>",
+                                            "3",
+                                        ],
+                                    ],
+                                    "<newline ''>",
+                                    "]",
                                 ],
                             ],
-                            "<newline>",
-                            "]",
                         ],
                     ],
                 ],
             ],
-            "<newline>",
+            "<newline ''>",
             "}",
         ]
     ]
 
 
 def test_layout_basic():
-    text = '{"a": true, "b":[1,2,3]}'
+    text = '{"a": true, "b":[1,2,3], "c":[1,2,3,4,5,6,7]}'
     tokens = runtime.GenericTokenStream(text, JSON_LEXER)
     tree, errors = JSON_PARSER.parse(tokens)
     assert [] == errors
     assert tree is not None
 
     printer = wadler.Printer(JSON)
-    result = printer.format_tree(tree, 10).apply_to_source(text)
+    result = printer.format_tree(tree, 50).apply_to_source(text)
 
     assert (
         result
         == """
 {
  "a": true,
- "b": [
-  1,
-  2,
-  3
- ]
+ "b": [1, 2, 3],
+ "c": [1, 2, 3, 4, 5, 6, 7]
 }
 """.strip()
     )
