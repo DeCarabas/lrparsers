@@ -13,6 +13,8 @@ class TokenValue:
     kind: str
     start: int
     end: int
+    pre_trivia: list["TokenValue"]
+    post_trivia: list["TokenValue"]
 
 
 @dataclass
@@ -313,17 +315,50 @@ class Parser:
         self.table = table
 
     def parse(self, tokens: TokenStream) -> typing.Tuple[Tree | None, list[str]]:
-        # TODO: If this were a for reals for reals parser we would keep the trivia
-        #       accessible in the tree.
         input_tokens = tokens.tokens()
-        input: list[TokenValue] = [
-            TokenValue(kind=kind.name, start=start, end=start + length)
-            for (kind, start, length) in input_tokens
-            if kind.name is not None and kind.name not in self.table.trivia
-        ]
+
+        # Filter the input tokens, to generate a list of non-trivia tokens.
+        # In addition, track the trivia tokens we find along the way, and put
+        # them into a list attached to each non-trivia token, so we can
+        # actually recover the document *as written*.
+        input: list[TokenValue] = []
+        trivia: list[TokenValue] = []
+        for kind, start, length in input_tokens:
+            assert kind.name is not None
+            if kind.name in self.table.trivia:
+                trivia.append(
+                    TokenValue(
+                        kind=kind.name,
+                        start=start,
+                        end=start + length,
+                        pre_trivia=[],
+                        post_trivia=[],
+                    )
+                )
+            else:
+                prev_trivia = trivia
+                trivia = []
+
+                input.append(
+                    TokenValue(
+                        kind=kind.name,
+                        start=start,
+                        end=start + length,
+                        pre_trivia=prev_trivia,
+                        post_trivia=trivia,
+                    )
+                )
 
         eof = 0 if len(input) == 0 else input[-1].end
-        input = input + [TokenValue(kind="$", start=eof, end=eof)]
+        input = input + [
+            TokenValue(
+                kind="$",
+                start=eof,
+                end=eof,
+                pre_trivia=trivia,
+                post_trivia=[],
+            )
+        ]
         input_index = 0
 
         # Our stack is a stack of tuples, where the first entry is the state
@@ -428,7 +463,14 @@ class Parser:
                                 assert repair.value is not None
                                 pos = input[cursor].end
                                 input.insert(
-                                    cursor, TokenValue(kind=repair.value, start=pos, end=pos)
+                                    cursor,
+                                    TokenValue(
+                                        kind=repair.value,
+                                        start=pos,
+                                        end=pos,
+                                        pre_trivia=[],
+                                        post_trivia=[],
+                                    ),
                                 )
                                 cursor += 1
 

@@ -20,7 +20,7 @@ class Tokens:
 
 def _tree(treeform) -> runtime.Tree | runtime.TokenValue:
     if isinstance(treeform, str):
-        return runtime.TokenValue(treeform, 0, 0)
+        return runtime.TokenValue(treeform, 0, 0, [], [])
     else:
         assert isinstance(treeform, tuple)
         name = treeform[0]
@@ -277,7 +277,34 @@ def test_grammar_ignore_trivia():
     )
 
     assert errors == []
-    assert tree == _tree(("sentence", ("sentence", "WORD"), "WORD"))
+    assert tree == runtime.Tree(
+        "sentence",
+        0,
+        0,
+        (
+            runtime.Tree(
+                "sentence",
+                0,
+                0,
+                (
+                    runtime.TokenValue(
+                        "WORD",
+                        0,
+                        0,
+                        [],
+                        [runtime.TokenValue("BLANK", 0, 0, [], [])],
+                    ),
+                ),
+            ),
+            runtime.TokenValue(
+                "WORD",
+                0,
+                0,
+                [runtime.TokenValue("BLANK", 0, 0, [], [])],
+                [runtime.TokenValue("BLANK", 0, 0, [], [])],
+            ),
+        ),
+    )
 
 
 def test_grammar_unknown_trivia():

@@ -255,7 +255,16 @@ class Matcher:
         table = self.table
 
         input = [(child_to_name(i), i) for i in items] + [
-            ("$", runtime.TokenValue(kind="$", start=0, end=0))
+            (
+                "$",
+                runtime.TokenValue(
+                    kind="$",
+                    start=0,
+                    end=0,
+                    pre_trivia=[],
+                    post_trivia=[],
+                ),
+            )
         ]
         input_index = 0
 
