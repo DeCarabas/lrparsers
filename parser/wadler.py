@@ -248,23 +248,11 @@ def child_to_name(child: runtime.Tree | runtime.TokenValue) -> str:
         return f"token_{child.kind}"
 
 
+@dataclasses.dataclass
 class Matcher:
     table: parser.ParseTable
     indent_amounts: dict[str, int]
-    text_follow: dict[str, str]
     newline_replace: dict[str, str]
-
-    def __init__(
-        self,
-        table: parser.ParseTable,
-        indent_amounts: dict[str, int],
-        text_follow: dict[str, str],
-        newline_replace: dict[str, str],
-    ):
-        self.table = table
-        self.indent_amounts = indent_amounts
-        self.text_follow = text_follow
-        self.newline_replace = newline_replace
 
     def match(self, printer: "Printer", items: list[runtime.Tree | runtime.TokenValue]) -> Document:
         stack: list[tuple[int, Document]] = [(0, None)]
@@ -329,37 +317,11 @@ class Matcher:
                 case parser.Shift():
                     value = current_token[1]
 
-                    follow = None
                     if isinstance(value, runtime.Tree):
                         child = Lazy.from_tree(value, printer)
-                        if value.name:
-                            follow = self.text_follow.get(value.name)
                     else:
-                        # Here is where we consider ephemera. We can say: if
-                        # the trailing ephemera includes a blank, then we
-                        # insert a blank here. We do not want to double-count
-                        # blanks, maybe we can have some kind of a notion of
-                        # what is a blank.
-                        #
-                        # A wierd digression: one thing that's weird is that
-                        # blank spaces are always kinda culturally assumed?
-                        # But the computer always has to be taught. In hand-
-                        # printers, the spaces are added by a person and the
-                        # person doesn't think twice. We are in the unique
-                        # position of "generalizing" the blank space for
-                        # formatting purposes.
+                        # TODO: Consider trivia and preserve comments!
                         child = Text(value.start, value.end)
-
-                        for trivia in value.pre_trivia:
-                            pass
-
-                        for trivia in value.post_trivia:
-                            pass
-
-                        follow = self.text_follow.get(value.kind)
-
-                    if follow is not None:
-                        child = cons(child, Literal(follow))
 
                     stack.append((action.state, child))
                     input_index += 1
@@ -372,7 +334,6 @@ class Printer:
     # TODO: Pre-generate the matcher tables for a grammar, to make it
     #       possible to do codegen in other languages.
     grammar: parser.Grammar
-    _text_follow: dict[str, str]
     _matchers: dict[str, Matcher]
     _nonterminals: dict[str, parser.NonTerminal]
 
@@ -380,13 +341,6 @@ class Printer:
         self.grammar = grammar
         self._nonterminals = {nt.name: nt for nt in grammar.non_terminals()}
         self._matchers = {}
-
-        text_follow = {}
-        for terminal in self.grammar.terminals():
-            follow = terminal.meta.get("format_follow")
-            if isinstance(follow, str):
-                text_follow[terminal.name] = follow
-        self._text_follow = text_follow
 
     def lookup_nonterminal(self, name: str) -> parser.NonTerminal:
         return self._nonterminals[name]
@@ -484,7 +438,6 @@ class Printer:
         return Matcher(
             parse_table,
             indent_amounts,
-            self._text_follow,
             newline_replace,
         )
 
