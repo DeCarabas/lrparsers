@@ -85,6 +85,7 @@ class FineGrammar(Grammar):
             indent(nl, mark(opt(self.class_body), field="body")),
             nl,
             self.RCURLY,
+            nl,  # Extra newline at the end of the class
         )
 
     @rule("ClassBody")
@@ -93,7 +94,7 @@ class FineGrammar(Grammar):
 
     @rule
     def _class_members(self) -> Rule:
-        return self._class_member | seq(self._class_members, self._class_member)
+        return self._class_member | seq(self._class_members, nl, self._class_member)
 
     @rule
     def _class_member(self) -> Rule:
@@ -101,7 +102,7 @@ class FineGrammar(Grammar):
 
     @rule("FieldDecl")
     def field_declaration(self) -> Rule:
-        return group(self.IDENTIFIER, self.COLON, sp, self.type_expression, self.SEMICOLON) + nl
+        return group(self.IDENTIFIER, self.COLON, sp, self.type_expression, self.SEMICOLON)
 
     # Types
     @rule("TypeExpression")
@@ -138,10 +139,14 @@ class FineGrammar(Grammar):
                 sp,
                 mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.function),
                 sp,
-                mark(self.function_parameters, field="parameters"),
-                mark(opt(sp, self.ARROW, sp, self.type_expression), field="return_type"),
+                group(
+                    mark(self.function_parameters, field="parameters"),
+                    mark(opt(sp, group(self.ARROW, sp, self.type_expression)), field="return_type"),
+                ),
             ),
+            sp,
             mark(self.block, field="body"),
+            nl,
         )
 
     @rule("ParamList")
@@ -177,7 +182,7 @@ class FineGrammar(Grammar):
     def block(self) -> Rule:
         return alt(
             group(self.LCURLY, nl, self.RCURLY),
-            seq(self.LCURLY, indent(br, self.block_body), br, self.RCURLY),
+            seq(self.LCURLY, indent(nl, self.block_body), nl, self.RCURLY),
         )
 
     @rule("BlockBody")
@@ -185,7 +190,7 @@ class FineGrammar(Grammar):
         return alt(
             self.expression,
             self._statement_list,
-            seq(self._statement_list, br, self.expression),
+            seq(self._statement_list, nl, self.expression),
         )
 
     @rule
@@ -338,14 +343,16 @@ class FineGrammar(Grammar):
 
     @rule
     def match_expression(self) -> Rule:
-        return group(group(self.MATCH, sp, self.expression), sp, self.match_body)
-
-    @rule("MatchBody")
-    def match_body(self) -> Rule:
-        return alt(
-            group(self.LCURLY, nl, self.RCURLY),
-            group(self.LCURLY, indent(nl, self._match_arms), nl, self.RCURLY),
+        return group(
+            group(self.MATCH, sp, self.expression, sp, self.LCURLY),
+            indent(sp, self.match_arms),
+            sp,
+            self.RCURLY,
         )
+
+    @rule("MatchArms")
+    def match_arms(self) -> Rule:
+        return self._match_arms
 
     @rule
     def _match_arms(self) -> Rule:
@@ -381,7 +388,7 @@ class FineGrammar(Grammar):
 
     @rule
     def object_constructor_expression(self) -> Rule:
-        return group(self.NEW, sp, self.type_identifier, self.field_list)
+        return group(self.NEW, sp, self.type_identifier, sp, self.field_list)
 
     @rule
     def field_list(self) -> Rule:

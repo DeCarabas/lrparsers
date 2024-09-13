@@ -18,6 +18,7 @@ import typing
 
 import parser
 from parser import runtime
+from parser import wadler
 
 # from parser import Token, Grammar, rule, seq
 
@@ -191,10 +192,28 @@ class DynamicLexerModule(DynamicModule[typing.Callable[[str], runtime.TokenStrea
         return get_tokens
 
 
+class DynamicPrinterModule(DynamicModule[wadler.Printer]):
+    def __init__(self, file_name, member_name):
+        super().__init__(file_name, member_name)
+
+    def _predicate(self, member) -> bool:
+        if not super()._predicate(member):
+            return False
+
+        if getattr(member, "build_table", None):
+            return True
+
+        return False
+
+    def _transform(self, value):
+        return wadler.Printer(value())
+
+
 class DisplayMode(enum.Enum):
     TREE = 0
     ERRORS = 1
     LOG = 2
+    DOCUMENT = 3
 
 
 class ListHandler(logging.Handler):
@@ -224,6 +243,7 @@ class Harness:
     source: str | None
     table: parser.ParseTable | None
     tree: runtime.Tree | None
+    document: wadler.Document
     mode: DisplayMode
     log_handler: ListHandler
 
@@ -252,6 +272,7 @@ class Harness:
         self.table = None
         self.tokens = None
         self.tree = None
+        self.document = None
         self.errors = []
 
         self.state_count = 0
@@ -267,6 +288,7 @@ class Harness:
         )
 
         self.lexer_module = DynamicLexerModule(self.lexer_file, self.grammar_member)
+        self.printer_module = DynamicPrinterModule(self.grammar_file, self.grammar_member)
 
         self.log_handler = ListHandler()
         logging.basicConfig(level=logging.INFO, handlers=[self.log_handler])
@@ -287,6 +309,9 @@ class Harness:
                 elif k == "l":
                     self.mode = DisplayMode.LOG
                     self.lines = None
+                elif k == "d":
+                    self.mode = DisplayMode.DOCUMENT
+                    self.lines = None
                 elif k == "j":
                     self.line_start = self.line_start - 1
                 elif k == "k":
@@ -300,6 +325,9 @@ class Harness:
 
     def load_grammar(self) -> parser.ParseTable:
         return self.grammar_module.get()
+
+    def load_printer(self) -> wadler.Printer:
+        return self.printer_module.get()
 
     def update(self):
         global VERSION
@@ -336,6 +364,12 @@ class Harness:
             self.state_count = len(states)
             self.average_entries = sum(len(row) for row in states) / len(states)
             self.max_entries = max(len(row) for row in states)
+
+            printer = self.load_printer()
+            if self.tree is not None:
+                self.document = printer.convert_tree_to_document(self.tree)
+            else:
+                self.document = None
 
         except Exception as e:
             self.tree = None
@@ -410,10 +444,14 @@ class Harness:
 
         has_errors = "*" if self.errors else " "
         has_tree = "*" if self.tree else " "
-        has_log = " " if self.log_handler.logs else " "
+        has_log = "*" if self.log_handler.logs else " "
+        has_document = "*" if self.document else " "
         goto_cursor(0, rows - 1)
         print(("\u2500" * cols) + "\r")
-        print(f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (q)uit\r", end="")
+        print(
+            f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (d)ocument{has_document} | (q)uit\r",
+            end="",
+        )
 
         sys.stdout.flush()
         sys.stdout.buffer.flush()
@@ -432,6 +470,10 @@ class Harness:
 
             case DisplayMode.LOG:
                 lines.extend(line for line in self.log_handler.logs)
+
+            case DisplayMode.DOCUMENT:
+                if self.document is not None:
+                    self.format_document(lines, self.document)
 
             case _:
                 typing.assert_never(self.mode)
@@ -459,18 +501,50 @@ class Harness:
 
         return lines
 
-    def format_node(self, lines, node: runtime.Tree | runtime.TokenValue, indent=0):
+    def format_node(self, lines, node: runtime.Tree):
         """Print out an indented concrete syntax tree, from parse()."""
-        match node:
-            case runtime.Tree(name=name, start=start, end=end, children=children):
-                lines.append((" " * indent) + f"{name or '???'} [{start}, {end})")
-                for child in children:
-                    self.format_node(lines, child, indent + 2)
+        lines.extend(node.format_lines(self.source))
 
-            case runtime.TokenValue(kind=kind, start=start, end=end):
-                assert self.source is not None
-                value = self.source[start:end]
-                lines.append((" " * indent) + f"{kind}:'{value}' [{start}, {end})")
+    def format_document(self, lines: list[str], doc: wadler.Document, indent: int = 0):
+        def append(x: str):
+            lines.append(("    " * indent) + x)
+
+        match doc:
+            case wadler.NewLine(replace):
+                append(f"newline {repr(replace)}")
+
+            case wadler.ForceBreak():
+                append(f"forced break")
+
+            case wadler.Indent():
+                append(f"indent {doc.amount}")
+                self.format_document(lines, doc.doc, indent + 1)
+
+            case wadler.Text(start, end):
+                if self.source is not None:
+                    append(f"< {self.source[start:end]}")
+                else:
+                    append(f"< ??? {start}:{end}")
+
+            case wadler.Literal(text):
+                append(f"' {text}")
+
+            case wadler.Group():
+                append("group")
+                self.format_document(lines, doc.child, indent + 1)
+
+            case wadler.Lazy():
+                self.format_document(lines, doc.resolve(), indent)
+
+            case wadler.Cons():
+                self.format_document(lines, doc.left, indent)
+                self.format_document(lines, doc.right, indent)
+
+            case None:
+                pass
+
+            case _:
+                typing.assert_never(doc)
 
 
 def main(args: list[str]):
