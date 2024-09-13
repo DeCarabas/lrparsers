@@ -183,7 +183,7 @@ class DynamicLexerModule(DynamicModule[typing.Callable[[str], runtime.TokenStrea
         return False
 
     def _transform(self, value):
-        lexer_table = parser.compile_lexer(value())
+        lexer_table = value().compile_lexer()
 
         def get_tokens(src: str) -> runtime.TokenStream:
             return runtime.GenericTokenStream(src, lexer_table)
