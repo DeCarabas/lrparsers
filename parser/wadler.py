@@ -348,7 +348,7 @@ class Printer:
     def compile_rule(self, rule: parser.NonTerminal) -> Matcher:
         generated_grammar: list[typing.Tuple[str, list[str]]] = []
         visited: set[str] = set()
-        group_count = 0
+        groups: dict[tuple[str, ...], str] = {}
         indent_amounts: dict[str, int] = {}
         newline_map: dict[str, str] = {}
         done_forced_break = False
@@ -361,7 +361,7 @@ class Printer:
                     generated_grammar.append((name, trans_prod))
 
         def compile_production(production: parser.FlattenedWithMetadata) -> list[str]:
-            nonlocal group_count
+            nonlocal groups
             nonlocal indent_amounts
             nonlocal done_forced_break
 
@@ -394,9 +394,13 @@ class Printer:
                     if isinstance(pretty, parser.FormatMeta):
                         if pretty.group:
                             # Make a fake rule.
-                            rule_name = f"g_{group_count}"
-                            group_count += 1
-                            generated_grammar.append((rule_name, tx_children))
+                            child_key = tuple(tx_children)
+                            rule_name = groups.get(child_key)
+                            if rule_name is None:
+                                rule_name = f"g_{len(groups)}"
+                                groups[child_key] = rule_name
+                                generated_grammar.append((rule_name, tx_children))
+
                             tx_children = [rule_name]
 
                         if pretty.indent:
