@@ -54,6 +54,12 @@ class Group:
     child: "Document"
 
 
+@dataclasses.dataclass(frozen=True)
+class Marker:
+    child: "Document"
+    meta: dict
+
+
 @dataclasses.dataclass
 class Lazy:
     value: typing.Callable[[], "Document"] | "Document"
@@ -68,7 +74,7 @@ class Lazy:
         return Lazy(lambda: printer.convert_tree_to_document(tree))
 
 
-Document = None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Lazy
+Document = None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Marker | Lazy
 
 
 class DocumentLayout:
@@ -162,6 +168,9 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                     # well.)
                     stack.append(chunk.with_document(child))
 
+                case Marker():
+                    stack.append(chunk.with_document(chunk.doc.child))
+
                 case _:
                     typing.assert_never(chunk.doc)
 
@@ -215,6 +224,9 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                     chunks.append(candidate)
                 else:
                     chunks.append(Chunk(doc=child, indent=chunk.indent, flat=False))
+
+            case Marker():
+                chunks.append(chunk.with_document(chunk.doc.child))
 
             case _:
                 typing.assert_never(chunk)

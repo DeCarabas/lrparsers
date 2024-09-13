@@ -506,7 +506,8 @@ class Harness:
         lines.extend(node.format_lines(self.source))
 
     def format_document(self, lines: list[str], doc: wadler.Document, indent: int = 0):
-        def append(x: str):
+        def append(x: str, i: int = 0):
+            i += indent
             lines.append(("    " * indent) + x)
 
         match doc:
@@ -539,6 +540,14 @@ class Harness:
             case wadler.Cons():
                 self.format_document(lines, doc.left, indent)
                 self.format_document(lines, doc.right, indent)
+
+            case wadler.Marker():
+                append("Marker")
+                append("metadata", 1)
+                for k, v in doc.meta.items():
+                    append(f"{k}={v}", 2)
+                append("child", 1)
+                self.format_document(lines, doc.child, indent + 2)
 
             case None:
                 pass
