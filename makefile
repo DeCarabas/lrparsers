@@ -4,4 +4,4 @@
 .PHONY: test
 test:
 	python3 ./parser/parser.py
-	pdm run pytest
+	pdm run python3 -m pytest

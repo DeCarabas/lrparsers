@@ -1,6 +1,22 @@
 import typing
 
-from parser.parser import Grammar, Re, Terminal, rule, opt, group, newline, alt, indent
+from parser.parser import (
+    Grammar,
+    Re,
+    Terminal,
+    rule,
+    opt,
+    group,
+    newline,
+    alt,
+    indent,
+    seq,
+    Rule,
+    Assoc,
+    sp,
+    nl,
+    br,
+)
 
 import parser.runtime as runtime
 import parser.wadler as wadler
@@ -57,10 +73,7 @@ class JsonGrammar(Grammar):
             self.value + self.COMMA + newline(" ") + self._array_items,
         )
 
-    BLANKS = Terminal(
-        Re.set(" ", "\t", "\r", "\n").plus(),
-        is_format_blank=True,
-    )
+    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
     LCURLY = Terminal("{")
     RCURLY = Terminal("}")
     COMMA = Terminal(",")
@@ -103,6 +116,8 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
     match doc:
         case wadler.NewLine(replace):
             return [f"<newline {repr(replace)}>"]
+        case wadler.ForceBreak():
+            return ["<forced break>"]
         case wadler.Indent():
             return [[f"<indent {doc.amount}>", flatten_document(doc.doc, src)]]
         case wadler.Text(start, end):
@@ -203,4 +218,66 @@ def test_layout_basic():
  "c": [1, 2, 3, 4, 5, 6, 7]
 }
 """.strip()
+    )
+
+
+def test_forced_break():
+    class TG(Grammar):
+        start = "root"
+        trivia = ["BLANKS"]
+
+        @rule
+        def root(self):
+            return self._expression
+
+        @rule
+        def _expression(self):
+            return self.word | self.list
+
+        @rule
+        def list(self):
+            return group(self.LPAREN, indent(nl, self._expressions), nl, self.RPAREN)
+
+        @rule
+        def _expressions(self):
+            return self._expression | seq(self._expressions, sp, self._expression)
+
+        @rule
+        def word(self):
+            return self.OK | seq(self.BREAK, br, self.BREAK)
+
+        LPAREN = Terminal("(")
+        RPAREN = Terminal(")")
+        OK = Terminal("ok")
+        BREAK = Terminal("break")
+
+        BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+
+    g = TG()
+    g_lexer = g.compile_lexer()
+    g_parser = runtime.Parser(g.build_table())
+
+    text = "((ok ok) (ok break break ok) (ok ok ok ok))"
+
+    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    assert errors == []
+    assert tree is not None
+
+    printer = wadler.Printer(g)
+    result = printer.format_tree(tree, 200).apply_to_source(text)
+
+    assert (
+        result
+        == """
+(
+ (ok ok)
+ (
+  ok
+  break
+  break
+  ok
+ )
+ (ok ok ok ok)
+)
+    """.strip()
     )

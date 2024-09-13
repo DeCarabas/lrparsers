@@ -540,7 +540,7 @@ class ErrorCollection:
                     match action:
                         case Reduce(name=name, count=count, transparent=transparent):
                             name_str = name if not transparent else f"transparent node ({name})"
-                            action_str = f"pop {count} values off the stack and make a {name_str}"
+                            action_str = f"use the {count} values to make a {name_str}"
                         case Shift():
                             action_str = "consume the token and keep going"
                         case Accept():
@@ -2680,6 +2680,7 @@ highlight = _Highlight()
 @dataclasses.dataclass
 class FormatMeta(SyntaxMeta):
     newline: str | None = None
+    forced_break: bool = False
     indent: int | None = None
     group: bool = False
 
@@ -2717,6 +2718,17 @@ def newline(text: str | None = None) -> Rule:
     return mark(Nothing, format=FormatMeta(newline=text))
 
 
+nl = newline("")
+
+sp = newline(" ")
+
+
+def forced_break() -> Rule:
+    return mark(Nothing, format=FormatMeta(forced_break=True))
+
+
+br = forced_break()
+
 ###############################################################################
 # Finally, the base class for grammars
 ###############################################################################
@@ -2753,7 +2765,8 @@ class Grammar:
 
     _precedence: dict[str, typing.Tuple[Assoc, int]]
     _generator: type[GenerateLR0]
-    _terminals: list[Terminal]
+    _terminals: dict[str, Terminal]
+    _nonterminals: dict[str, NonTerminal]
     _trivia: list[Terminal]
 
     def __init__(
@@ -2794,6 +2807,19 @@ class Grammar:
                 raise ValueError(f"More than one terminal has the name '{n}'")
             terminals[n] = t
 
+        # Get the nonterminals.
+        nonterminals = {}
+        for _, nt in inspect.getmembers(self, lambda x: isinstance(x, NonTerminal)):
+            if nt.name in nonterminals:
+                raise ValueError(f"More than one nonterminal found with the name '{nt.name}'")
+
+            if nt.name in terminals:
+                raise ValueError(
+                    f"'{nt.name}' is the name of both a Terminal and a NonTerminal rule"
+                )
+
+            nonterminals[nt.name] = nt
+
         # Resolve the trivia declarations correctly.
         resolved_trivia: list[Terminal] = []
         for t in trivia:
@@ -2809,12 +2835,22 @@ class Grammar:
         precedence_table = {}
         for prec, (associativity, symbols) in enumerate(precedence):
             for symbol in symbols:
+                key = None
                 if isinstance(symbol, Terminal):
                     key = symbol.name
+                    if key is None:
+                        raise ValueError(f"{symbol} is a terminal that has not had a name set yet")
                 elif isinstance(symbol, NonTerminal):
                     key = symbol.name
-                else:
-                    raise ValueError(f"{symbol} must be either a Token or a NonTerminal")
+                elif isinstance(symbol, str):
+                    key = terminals.get(symbol)
+                    if key is None:
+                        key = nonterminals.get(symbol)
+
+                if key is None:
+                    raise ValueError(
+                        f"{symbol} must be either a Token or a NonTerminal, or the name of one"
+                    )
 
                 precedence_table[key] = (associativity, prec + 1)
 
@@ -2826,18 +2862,19 @@ class Grammar:
         self._precedence = precedence_table
         self.start = start
         self._generator = generator
-        self._terminals = list(terminals.values())
+        self._terminals = terminals
+        self._nonterminals = nonterminals
         self._trivia = resolved_trivia
         self.name = name
 
     def terminals(self) -> list[Terminal]:
-        return self._terminals
+        return list(self._terminals.values())
 
     def trivia_terminals(self) -> list[Terminal]:
         return self._trivia
 
     def non_terminals(self) -> list[NonTerminal]:
-        return [nt for _, nt in inspect.getmembers(self, lambda x: isinstance(x, NonTerminal))]
+        return list(self._nonterminals.values())
 
     def get_precedence(self, name: str) -> None | tuple[Assoc, int]:
         return self._precedence.get(name)
@@ -2858,9 +2895,8 @@ class Grammar:
         if start is None:
             start = self.start
 
-        rules = self.non_terminals()
-        nonterminals = {rule.name: rule for rule in rules}
-        transparents = {rule.name for rule in rules if rule.transparent}
+        nonterminals = self._nonterminals
+        transparents = {rule.name for rule in nonterminals.values() if rule.transparent}
 
         grammar = {}
 

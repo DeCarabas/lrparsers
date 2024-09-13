@@ -5,6 +5,9 @@ import typing
 from . import parser
 from . import runtime
 
+# TODO: I think I want a *force break*, i.e., a document which forces things
+# to not fit on one line.
+
 
 @dataclasses.dataclass(frozen=True)
 class Cons:
@@ -22,6 +25,11 @@ def cons(left: "Document", right: "Document") -> "Document":
 @dataclasses.dataclass(frozen=True)
 class NewLine:
     replace: str
+
+
+@dataclasses.dataclass(frozen=True)
+class ForceBreak:
+    pass
 
 
 @dataclasses.dataclass(frozen=True)
@@ -60,7 +68,7 @@ class Lazy:
         return Lazy(lambda: printer.convert_tree_to_document(tree))
 
 
-Document = None | Text | Literal | NewLine | Cons | Indent | Group | Lazy
+Document = None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Lazy
 
 
 class DocumentLayout:
@@ -127,6 +135,12 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                         # all fit.
                         return True
 
+                case ForceBreak():
+                    # If we're in a flattened chunk then force it to break by
+                    # returning false here, otherwise we're at the end of the
+                    # line and yes, whatever you were asking about has fit.
+                    return not chunk.flat
+
                 case Cons(left, right):
                     stack.append(chunk.with_document(right))
                     stack.append(chunk.with_document(left))
@@ -179,6 +193,11 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                     # TODO: Custom newline expansion, custom indent segments.
                     output.append("\n" + (chunk.indent * " "))
                     column = chunk.indent
+
+            case ForceBreak():
+                # TODO: Custom newline expansion, custom indent segments.
+                output.append("\n" + (chunk.indent * " "))
+                column = chunk.indent
 
             case Cons(left, right):
                 chunks.append(chunk.with_document(right))
@@ -292,11 +311,13 @@ class Matcher:
 
                     elif name[0] == "n":
                         replace = self.newline_replace[name]
-                        print(f"!!!! {name} -> {repr(replace)}")
                         child = cons(child, NewLine(replace))
 
                     elif name[0] == "p":
                         child = cons(NewLine(""), child)
+
+                    elif name[0] == "f":
+                        child = cons(child, ForceBreak())
 
                     else:
                         pass  # Reducing a transparent rule probably.
@@ -375,8 +396,8 @@ class Printer:
         visited: set[str] = set()
         group_count = 0
         indent_amounts: dict[str, int] = {}
-        done_newline = False
         newline_map: dict[str, str] = {}
+        done_forced_break = False
 
         def compile_nonterminal(name: str, rule: parser.NonTerminal):
             if name not in visited:
@@ -388,7 +409,7 @@ class Printer:
         def compile_production(production: parser.FlattenedWithMetadata) -> list[str]:
             nonlocal group_count
             nonlocal indent_amounts
-            nonlocal done_newline
+            nonlocal done_forced_break
 
             result = []
             for item in production:
@@ -438,6 +459,13 @@ class Printer:
                                 generated_grammar.append((newline_rule_name, []))
 
                             tx_children.append(newline_rule_name)
+
+                        if pretty.forced_break:
+                            if not done_forced_break:
+                                generated_grammar.append(("forced_break", []))
+                                done_forced_break = True
+
+                            tx_children.append("forced_break")
 
                     # If it turned out to have formatting meta then we will
                     # have replaced or augmented the translated children

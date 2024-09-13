@@ -359,7 +359,7 @@ def test_lexer_compile():
         def foo(self):
             return self.IS
 
-        start = foo
+        start = "foo"
 
         IS = Terminal("is")
         AS = Terminal("as")
@@ -392,7 +392,7 @@ def test_lexer_numbers(n: float):
         def number(self):
             return self.NUMBER
 
-        start = number
+        start = "number"
 
         NUMBER = Terminal(
             Re.seq(

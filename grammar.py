@@ -6,14 +6,16 @@ from parser import (
     Rule,
     Terminal,
     alt,
+    br,
     group,
     highlight,
     indent,
     mark,
-    newline,
+    nl,
     opt,
     rule,
     seq,
+    sp,
 )
 
 
@@ -53,7 +55,7 @@ class FineGrammar(Grammar):
     def _file_statement_list(self) -> Rule:
         return alt(
             self._file_statement,
-            self._file_statement_list + newline() + self._file_statement,
+            self._file_statement_list + nl + self._file_statement,
         )
 
     @rule
@@ -64,7 +66,9 @@ class FineGrammar(Grammar):
 
     @rule
     def import_statement(self) -> Rule:
-        return seq(self.IMPORT, self.STRING, self.AS, self.IDENTIFIER, self.SEMICOLON)
+        return group(
+            self.IMPORT, sp, self.STRING, sp, self.AS, sp, self.IDENTIFIER, sp, self.SEMICOLON
+        )
 
     @rule("ClassDeclaration")
     def class_declaration(self) -> Rule:
@@ -72,16 +76,14 @@ class FineGrammar(Grammar):
             group(
                 group(
                     self.CLASS,
-                    newline(),
+                    sp,
                     mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.type),
+                    sp,
                 ),
                 self.LCURLY,
             ),
-            indent(
-                newline(),
-                mark(opt(self.class_body), field="body"),
-            ),
-            newline(),
+            indent(nl, mark(opt(self.class_body), field="body")),
+            nl,
             self.RCURLY,
         )
 
@@ -99,7 +101,7 @@ class FineGrammar(Grammar):
 
     @rule("FieldDecl")
     def field_declaration(self) -> Rule:
-        return seq(self.IDENTIFIER, self.COLON, self.type_expression, self.SEMICOLON)
+        return group(self.IDENTIFIER, self.COLON, sp, self.type_expression, self.SEMICOLON) + nl
 
     # Types
     @rule("TypeExpression")
@@ -108,7 +110,7 @@ class FineGrammar(Grammar):
 
     @rule("AlternateType")
     def alternate_type(self) -> Rule:
-        return seq(self.type_expression, self.OR, self.type_identifier)
+        return group(self.type_expression, sp, self.OR, sp, self.type_identifier)
 
     @rule("TypeIdentifier")
     def type_identifier(self) -> Rule:
@@ -117,28 +119,28 @@ class FineGrammar(Grammar):
     @rule
     def export_statement(self) -> Rule:
         return alt(
-            seq(self.EXPORT, self.class_declaration),
-            seq(self.EXPORT, self.function_declaration),
-            seq(self.EXPORT, self.let_statement),
-            seq(self.EXPORT, self.export_list, self.SEMICOLON),
+            group(self.EXPORT, sp, self.class_declaration),
+            group(self.EXPORT, sp, self.function_declaration),
+            group(self.EXPORT, sp, self.let_statement),
+            group(self.EXPORT, sp, self.export_list, self.SEMICOLON),
         )
 
     @rule
     def export_list(self) -> Rule:
-        return (
-            self.IDENTIFIER
-            | seq(self.IDENTIFIER, self.COMMA)
-            | seq(self.IDENTIFIER, self.COMMA, self.export_list)
-        )
+        return self.IDENTIFIER | seq(self.IDENTIFIER, self.COMMA, sp, self.export_list)
 
     # Functions
     @rule("FunctionDecl")
     def function_declaration(self) -> Rule:
         return seq(
-            self.FUN,
-            mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.function),
-            mark(self.function_parameters, field="parameters"),
-            mark(opt(self.ARROW, self.type_expression), field="return_type"),
+            group(
+                self.FUN,
+                sp,
+                mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.function),
+                sp,
+                mark(self.function_parameters, field="parameters"),
+                mark(opt(sp, self.ARROW, sp, self.type_expression), field="return_type"),
+            ),
             mark(self.block, field="body"),
         )
 
@@ -147,14 +149,14 @@ class FineGrammar(Grammar):
         return group(
             self.LPAREN,
             indent(
-                newline(),
+                nl,
                 opt(
                     self._first_parameter
                     | seq(self._first_parameter, self.COMMA)
-                    | group(self._first_parameter, self.COMMA, newline(), self._parameter_list)
+                    | group(self._first_parameter, self.COMMA, sp, self._parameter_list)
                 ),
             ),
-            newline(),
+            nl,
             self.RPAREN,
         )
 
@@ -164,18 +166,18 @@ class FineGrammar(Grammar):
 
     @rule
     def _parameter_list(self) -> Rule:
-        return self.parameter | seq(self.parameter, self.COMMA, newline(), self._parameter_list)
+        return self.parameter | seq(self.parameter, self.COMMA, sp, self._parameter_list)
 
     @rule("Parameter")
     def parameter(self) -> Rule:
-        return seq(self.IDENTIFIER, self.COLON, self.type_expression)
+        return group(self.IDENTIFIER, self.COLON, sp, self.type_expression)
 
     # Block
     @rule("Block")
     def block(self) -> Rule:
         return alt(
-            seq(self.LCURLY, self.RCURLY),
-            group(self.LCURLY, indent(newline(), self.block_body), newline(), self.RCURLY),
+            group(self.LCURLY, nl, self.RCURLY),
+            seq(self.LCURLY, indent(br, self.block_body), br, self.RCURLY),
         )
 
     @rule("BlockBody")
@@ -183,12 +185,12 @@ class FineGrammar(Grammar):
         return alt(
             self.expression,
             self._statement_list,
-            seq(self._statement_list, newline(), self.expression),
+            seq(self._statement_list, br, self.expression),
         )
 
     @rule
     def _statement_list(self) -> Rule:
-        return self._statement | seq(self._statement_list, self._statement)
+        return self._statement | seq(self._statement_list, br, self._statement)
 
     @rule
     def _statement(self) -> Rule:
@@ -204,15 +206,26 @@ class FineGrammar(Grammar):
 
     @rule("LetStatement")
     def let_statement(self) -> Rule:
-        return seq(self.LET, self.IDENTIFIER, self.EQUAL, self.expression, self.SEMICOLON)
+        return group(
+            self.LET,
+            sp,
+            self.IDENTIFIER,
+            indent(sp, self.EQUAL, indent(sp, group(self.expression, self.SEMICOLON))),
+        )
 
     @rule("ReturnStatement")
     def return_statement(self) -> Rule:
-        return seq(self.RETURN, self.expression, self.SEMICOLON) | seq(self.RETURN, self.SEMICOLON)
+        return alt(
+            group(self.RETURN, indent(sp, group(self.expression, self.SEMICOLON))),
+            group(self.RETURN, self.SEMICOLON),
+        )
 
     @rule("ForStatement")
     def for_statement(self) -> Rule:
-        return seq(self.FOR, self.iterator_variable, self.IN, self.expression, self.block)
+        return group(
+            group(self.FOR, sp, self.iterator_variable, sp, self.IN, sp, group(self.expression)),
+            self.block,
+        )
 
     @rule("IteratorVariable")
     def iterator_variable(self) -> Rule:
@@ -224,7 +237,7 @@ class FineGrammar(Grammar):
 
     @rule
     def while_statement(self) -> Rule:
-        return seq(self.WHILE, self.expression, self.block)
+        return group(group(self.WHILE, sp, self.expression), sp, self.block)
 
     @rule
     def expression_statement(self) -> Rule:
@@ -238,24 +251,24 @@ class FineGrammar(Grammar):
     @rule("BinaryExpression")
     def binary_expression(self) -> Rule:
         return alt(
-            self.expression + self.EQUAL + self.expression,
-            self.expression + self.OR + self.expression,
-            self.expression + self.AND + self.expression,
-            self.expression + self.EQUALEQUAL + self.expression,
-            self.expression + self.BANGEQUAL + self.expression,
-            self.expression + self.LESS + self.expression,
-            self.expression + self.LESSEQUAL + self.expression,
-            self.expression + self.GREATER + self.expression,
-            self.expression + self.GREATEREQUAL + self.expression,
-            self.expression + self.PLUS + self.expression,
-            self.expression + self.MINUS + self.expression,
-            self.expression + self.STAR + self.expression,
-            self.expression + self.SLASH + self.expression,
+            group(self.expression, sp, self.EQUAL, sp, self.expression),
+            group(self.expression, sp, self.OR, sp, self.expression),
+            group(self.expression, sp, self.AND, sp, self.expression),
+            group(self.expression, sp, self.EQUALEQUAL, sp, self.expression),
+            group(self.expression, sp, self.BANGEQUAL, sp, self.expression),
+            group(self.expression, sp, self.LESS, sp, self.expression),
+            group(self.expression, sp, self.LESSEQUAL, sp, self.expression),
+            group(self.expression, sp, self.GREATER, sp, self.expression),
+            group(self.expression, sp, self.GREATEREQUAL, sp, self.expression),
+            group(self.expression, sp, self.PLUS, sp, self.expression),
+            group(self.expression, sp, self.MINUS, sp, self.expression),
+            group(self.expression, sp, self.STAR, sp, self.expression),
+            group(self.expression, sp, self.SLASH, sp, self.expression),
         )
 
     @rule("IsExpression")
     def is_expression(self) -> Rule:
-        return seq(self.expression, self.IS, self.pattern)
+        return group(self.expression, sp, self.IS, indent(sp, self.pattern))
 
     @rule
     def primary_expression(self) -> Rule:
@@ -271,9 +284,15 @@ class FineGrammar(Grammar):
             | self.object_constructor_expression
             | self.match_expression
             | seq(self.primary_expression, self.LPAREN, self.RPAREN)
-            | seq(self.primary_expression, self.LPAREN, self._expression_list, self.RPAREN)
-            | seq(self.primary_expression, self.DOT, self.IDENTIFIER)
-            | seq(self.LPAREN, self.expression, self.RPAREN)
+            | group(
+                self.primary_expression,
+                self.LPAREN,
+                indent(nl, self._expression_list),
+                nl,
+                self.RPAREN,
+            )
+            | group(self.primary_expression, indent(nl, self.DOT, self.IDENTIFIER))
+            | group(self.LPAREN, indent(nl, self.expression), nl, self.RPAREN)
         )
 
     @rule("IdentifierExpression")
@@ -287,15 +306,26 @@ class FineGrammar(Grammar):
     @rule("ConditionalExpression")
     def conditional_expression(self) -> Rule:
         return (
-            seq(self.IF, self.expression, self.block)
-            | seq(self.IF, self.expression, self.block, self.ELSE, self.conditional_expression)
-            | seq(self.IF, self.expression, self.block, self.ELSE, self.block)
+            seq(group(self.IF, sp, self.expression), sp, self.block)
+            | seq(
+                group(self.IF, sp, self.expression),
+                sp,
+                self.block,
+                sp,
+                self.ELSE,
+                sp,
+                self.conditional_expression,
+            )
+            | seq(
+                group(self.IF, sp, self.expression), sp, self.block, sp, self.ELSE, sp, self.block
+            )
         )
 
     @rule
     def list_constructor_expression(self) -> Rule:
-        return seq(self.LSQUARE, self.RSQUARE) | seq(
-            self.LSQUARE, self._expression_list, self.RSQUARE
+        return alt(
+            group(self.LSQUARE, nl, self.RSQUARE),
+            group(self.LSQUARE, indent(nl, self._expression_list), nl, self.RSQUARE),
         )
 
     @rule
@@ -303,34 +333,37 @@ class FineGrammar(Grammar):
         return (
             self.expression
             | seq(self.expression, self.COMMA)
-            | seq(self.expression, self.COMMA, self._expression_list)
+            | seq(self.expression, self.COMMA, sp, self._expression_list)
         )
 
     @rule
     def match_expression(self) -> Rule:
-        return seq(self.MATCH, self.expression, self.match_body)
+        return group(group(self.MATCH, sp, self.expression), sp, self.match_body)
 
     @rule("MatchBody")
     def match_body(self) -> Rule:
-        return seq(self.LCURLY, self.RCURLY) | seq(self.LCURLY, self._match_arms, self.RCURLY)
+        return alt(
+            group(self.LCURLY, nl, self.RCURLY),
+            group(self.LCURLY, indent(nl, self._match_arms), nl, self.RCURLY),
+        )
 
     @rule
     def _match_arms(self) -> Rule:
         return (
             self.match_arm
             | seq(self.match_arm, self.COMMA)
-            | seq(self.match_arm, self.COMMA, self._match_arms)
+            | seq(self.match_arm, self.COMMA, br, self._match_arms)
         )
 
     @rule("MatchArm")
     def match_arm(self) -> Rule:
-        return seq(self.pattern, self.ARROW, self.expression)
+        return group(self.pattern, sp, self.ARROW, sp, self.expression)
 
     @rule("Pattern")
     def pattern(self) -> Rule:
         return (
-            seq(self.variable_binding, self._pattern_core, self.AND, self.expression)
-            | seq(self.variable_binding, self._pattern_core)
+            group(self.variable_binding, self._pattern_core, sp, self.AND, sp, self.expression)
+            | group(self.variable_binding, self._pattern_core)
             | self._pattern_core
         )
 
@@ -348,23 +381,26 @@ class FineGrammar(Grammar):
 
     @rule
     def object_constructor_expression(self) -> Rule:
-        return seq(self.NEW, self.type_identifier, self.field_list)
+        return group(self.NEW, sp, self.type_identifier, self.field_list)
 
     @rule
     def field_list(self) -> Rule:
-        return seq(self.LCURLY, self.RCURLY) | seq(self.LCURLY, self.field_values, self.RCURLY)
+        return alt(
+            seq(self.LCURLY, self.RCURLY),
+            group(self.LCURLY, indent(nl, self.field_values), nl, self.RCURLY),
+        )
 
     @rule
     def field_values(self) -> Rule:
         return (
             self.field_value
             | seq(self.field_value, self.COMMA)
-            | seq(self.field_value, self.COMMA, self.field_values)
+            | seq(self.field_value, self.COMMA, sp, self.field_values)
         )
 
     @rule
     def field_value(self) -> Rule:
-        return self.IDENTIFIER | seq(self.IDENTIFIER, self.COLON, self.expression)
+        return self.IDENTIFIER | group(self.IDENTIFIER, self.COLON, indent(sp, self.expression))
 
     BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
     COMMENT = Terminal(
@@ -461,13 +497,17 @@ if __name__ == "__main__":
     from parser.emacs import emit_emacs_major_mode
     from parser.tree_sitter import emit_tree_sitter_grammar, emit_tree_sitter_queries
 
+    # TODO: Actually generate a lexer/parser for some runtime.
     grammar = FineGrammar()
     grammar.build_table()
 
     lexer = grammar.compile_lexer()
     dump_lexer_table(lexer)
 
+    # Generate tree-sitter parser and emacs mode.
     ts_path = Path(__file__).parent / "tree-sitter-fine"
     emit_tree_sitter_grammar(grammar, ts_path)
     emit_tree_sitter_queries(grammar, ts_path)
     emit_emacs_major_mode(grammar, ts_path / "fine.el")
+
+    # TODO: Generate pretty-printer code.
