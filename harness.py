@@ -214,6 +214,7 @@ class DisplayMode(enum.Enum):
     ERRORS = 1
     LOG = 2
     DOCUMENT = 3
+    PRETTY = 4
 
 
 class ListHandler(logging.Handler):
@@ -311,6 +312,9 @@ class Harness:
                     self.lines = None
                 elif k == "d":
                     self.mode = DisplayMode.DOCUMENT
+                    self.lines = None
+                elif k == "p":
+                    self.mode = DisplayMode.PRETTY
                     self.lines = None
                 elif k == "j":
                     self.line_start = self.line_start - 1
@@ -449,7 +453,7 @@ class Harness:
         goto_cursor(0, rows - 1)
         print(("\u2500" * cols) + "\r")
         print(
-            f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (d)ocument{has_document} | (q)uit\r",
+            f"(e)rrors{has_errors} | (t)ree{has_tree} | (l)og{has_log} | (d)ocument{has_document} | (p)retty{has_document} | (q)uit\r",
             end="",
         )
 
@@ -474,6 +478,9 @@ class Harness:
             case DisplayMode.DOCUMENT:
                 if self.document is not None:
                     self.format_document(lines, self.document)
+
+            case DisplayMode.PRETTY:
+                lines = self.pretty_document(cols)
 
             case _:
                 typing.assert_never(self.mode)
@@ -554,6 +561,14 @@ class Harness:
 
             case _:
                 typing.assert_never(doc)
+
+    def pretty_document(self, width: int) -> list[str]:
+        if self.document is None or self.source is None:
+            return []
+
+        return (
+            wadler.layout_document(self.document, width).apply_to_source(self.source).splitlines()
+        )
 
 
 def main(args: list[str]):
