@@ -314,10 +314,14 @@ class Matcher:
                         child = cons(child, NewLine(replace))
 
                     elif name[0] == "p":
-                        child = cons(NewLine(""), child)
+                        replace = self.newline_replace[name]
+                        child = cons(NewLine(replace), child)
 
                     elif name[0] == "f":
                         child = cons(child, ForceBreak())
+
+                    elif name[0] == "d":
+                        child = cons(ForceBreak(), child)
 
                     else:
                         pass  # Reducing a transparent rule probably.
@@ -360,10 +364,23 @@ class Printer:
     def compile_rule(self, rule: parser.NonTerminal) -> Matcher:
         generated_grammar: list[typing.Tuple[str, list[str]]] = []
         visited: set[str] = set()
+
+        # In order to generate groups, indents, and newlines we need to
+        # synthesize new productions. And it happens sometimes that we get
+        # duplicates, repeated synthetic productions. It's important to
+        # de-duplicate productions, otherwise we'll wind up with ambiguities
+        # in the parser.
+        #
+        # These dictionaries track the synthetic rules: the keys are
+        # production and also the parameter (if any), and the values are the
+        # names of the productions that produce the effect.
+        #
         groups: dict[tuple[str, ...], str] = {}
-        indent_amounts: dict[str, int] = {}
-        newline_map: dict[str, str] = {}
-        done_forced_break = False
+        indents: dict[tuple[tuple[str, ...], int], str] = {}
+        newlines: dict[tuple[tuple[str, ...], str], str] = {}
+        prefix_count: int = 0
+
+        final_newlines: dict[str, str] = {}
 
         def compile_nonterminal(name: str, rule: parser.NonTerminal):
             if name not in visited:
@@ -374,8 +391,12 @@ class Printer:
 
         def compile_production(production: parser.FlattenedWithMetadata) -> list[str]:
             nonlocal groups
-            nonlocal indent_amounts
-            nonlocal done_forced_break
+            nonlocal indents
+            nonlocal newlines
+            nonlocal prefix_count
+            nonlocal final_newlines
+
+            prefix_stack: list[str] = []
 
             result = []
             for item in production:
@@ -416,26 +437,55 @@ class Printer:
                             tx_children = [rule_name]
 
                         if pretty.indent:
-                            rule_name = f"i_{len(indent_amounts)}"
-                            indent_amounts[rule_name] = pretty.indent
-                            generated_grammar.append((rule_name, tx_children))
+                            child_key = (tuple(tx_children), pretty.indent)
+                            rule_name = indents.get(child_key)
+                            if rule_name is None:
+                                rule_name = f"i_{len(indents)}"
+                                indents[child_key] = rule_name
+                                generated_grammar.append((rule_name, tx_children))
+
                             tx_children = [rule_name]
 
                         if pretty.newline is not None:
-                            newline_rule_name = newline_map.get(pretty.newline)
-                            if newline_rule_name is None:
-                                newline_rule_name = f"n{len(newline_map)}"
-                                newline_map[pretty.newline] = newline_rule_name
-                                generated_grammar.append((newline_rule_name, []))
+                            if len(tx_children) == 0:
+                                tx_children = result
+                                result = []
 
-                            tx_children.append(newline_rule_name)
+                            if len(tx_children) > 0:
+                                # n == postfix newline
+                                child_key = (tuple(tx_children), pretty.newline)
+                                rule_name = newlines.get(child_key)
+                                if rule_name is None:
+                                    rule_name = f"n_{len(newlines)}"
+                                    newlines[child_key] = rule_name
+                                    generated_grammar.append((rule_name, tx_children))
+
+                                tx_children = [rule_name]
+
+                            else:
+                                # p == prefix newline
+                                rule_name = f"p_{prefix_count}"
+                                prefix_count += 1
+                                final_newlines[rule_name] = pretty.newline
+                                prefix_stack.append(rule_name)
 
                         if pretty.forced_break:
-                            if not done_forced_break:
-                                generated_grammar.append(("forced_break", []))
-                                done_forced_break = True
+                            if len(tx_children) == 0:
+                                tx_children = result
+                                result = []
 
-                            tx_children.append("forced_break")
+                            if len(tx_children) > 0:
+                                # f == postfix forced break
+                                rule_name = f"f_{prefix_count}"
+                                prefix_count += 1
+
+                                generated_grammar.append((rule_name, tx_children))
+                                tx_children = [rule_name]
+                            else:
+                                # d == prefix forced break (to the right of 'f' on my kbd)
+                                rule_name = f"d_{prefix_count}"
+                                prefix_count += 1
+                                prefix_stack.append(rule_name)
 
                     # If it turned out to have formatting meta then we will
                     # have replaced or augmented the translated children
@@ -444,17 +494,28 @@ class Printer:
                     # translated children should just be inserted inline.
                     result.extend(tx_children)
 
+            # OK so we might have some prefix newlines. They should contain... things.
+            while len(prefix_stack) > 0:
+                rule_name = prefix_stack.pop()
+                generated_grammar.append((rule_name, result))
+                result = [rule_name]
+
             return result
 
-        compile_nonterminal(rule.name, rule)
-        gen = self.grammar._generator(rule.name, generated_grammar)
+        start_name = f"yyy_{rule.name}"
+        compile_nonterminal(start_name, rule)
+        gen = self.grammar._generator(start_name, generated_grammar)
         parse_table = gen.gen_table()
 
-        newline_replace = {v: k for k, v in newline_map.items()}
+        for (_, replacement), rule_name in newlines.items():
+            final_newlines[rule_name] = replacement
+
+        indent_amounts = {rule_name: amount for ((_, amount), rule_name) in indents.items()}
+
         return Matcher(
             parse_table,
             indent_amounts,
-            newline_replace,
+            final_newlines,
         )
 
     def rule_to_matcher(self, rule: parser.NonTerminal) -> Matcher:
