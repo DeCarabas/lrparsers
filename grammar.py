@@ -25,6 +25,8 @@ class FineGrammar(Grammar):
 
     trivia = ["BLANKS", "COMMENT"]
 
+    pretty_indent = "  "
+
     def __init__(self):
         super().__init__(
             precedence=[
@@ -135,13 +137,22 @@ class FineGrammar(Grammar):
     def function_declaration(self) -> Rule:
         return seq(
             group(
-                self.FUN,
-                sp,
-                mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.function),
-                sp,
                 group(
+                    group(
+                        self.FUN,
+                        sp,
+                        mark(
+                            self.IDENTIFIER,
+                            field="name",
+                            highlight=highlight.entity.name.function,
+                        ),
+                    ),
+                    nl,
                     mark(self.function_parameters, field="parameters"),
-                    mark(opt(sp, group(self.ARROW, sp, self.type_expression)), field="return_type"),
+                ),
+                mark(
+                    opt(indent(sp, group(self.ARROW, sp, self.type_expression))),
+                    field="return_type",
                 ),
             ),
             sp,
