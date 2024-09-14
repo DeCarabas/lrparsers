@@ -460,6 +460,12 @@ class Harness:
         sys.stdout.flush()
         sys.stdout.buffer.flush()
 
+    def line_number_chars(self, lines: list) -> int:
+        if len(lines) > 0:
+            return int(math.log(len(lines), 10)) + 1
+        else:
+            return 1
+
     def render_lines(self, cols: int):
         lines = []
 
@@ -480,17 +486,24 @@ class Harness:
                     self.format_document(lines, self.document)
 
             case DisplayMode.PRETTY:
-                lines = self.pretty_document(cols)
+                line_number_chars = 1
+                while True:
+                    width = cols - line_number_chars - 1
+                    lines = self.pretty_document(width)
+                    new_line_number_chars = self.line_number_chars(lines)
+                    if new_line_number_chars == line_number_chars:
+                        break
+                    assert new_line_number_chars > line_number_chars
+                    line_number_chars = new_line_number_chars
+
+                return [f"{i: >{line_number_chars}} {line}" for i, line in enumerate(lines)]
 
             case _:
                 typing.assert_never(self.mode)
 
         # Now that we know how many lines there are we can figure out how
         # many characters we need for the line number...
-        if len(lines) > 0:
-            line_number_chars = int(math.log(len(lines), 10)) + 1
-        else:
-            line_number_chars = 1
+        line_number_chars = self.line_number_chars(lines)
 
         # ...which lets us wrap the lines appropriately.
         wrapper = textwrap.TextWrapper(
