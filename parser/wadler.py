@@ -108,7 +108,7 @@ class DocumentLayout:
         return result
 
 
-def layout_document(doc: Document, width: int) -> DocumentLayout:
+def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
     """Lay out a document to fit within the given width.
 
     The result of this function is a DocumentLayout which can trivially be
@@ -213,13 +213,13 @@ def layout_document(doc: Document, width: int) -> DocumentLayout:
                     column += len(replace)
                 else:
                     # TODO: Custom newline expansion, custom indent segments.
-                    output.append("\n" + (chunk.indent * " "))
-                    column = chunk.indent
+                    output.append("\n" + (chunk.indent * indent))
+                    column = chunk.indent * len(indent)
 
             case ForceBreak():
                 # TODO: Custom newline expansion, custom indent segments.
-                output.append("\n" + (chunk.indent * " "))
-                column = chunk.indent
+                output.append("\n" + (chunk.indent * indent))
+                column = chunk.indent * len(indent)
 
             case Cons(left, right):
                 chunks.append(chunk.with_document(right))
@@ -363,11 +363,19 @@ class Printer:
     grammar: parser.Grammar
     _matchers: dict[str, Matcher]
     _nonterminals: dict[str, parser.NonTerminal]
+    _indent: str
 
-    def __init__(self, grammar: parser.Grammar):
+    def __init__(self, grammar: parser.Grammar, indent: str | None = None):
         self.grammar = grammar
         self._nonterminals = {nt.name: nt for nt in grammar.non_terminals()}
         self._matchers = {}
+
+        if indent is None:
+            indent = getattr(self.grammar, "pretty_indent", " ")
+        self._indent = indent
+
+    def indent(self) -> str:
+        return self._indent
 
     def lookup_nonterminal(self, name: str) -> parser.NonTerminal:
         return self._nonterminals[name]
@@ -552,4 +560,4 @@ class Printer:
 
     def format_tree(self, tree: runtime.Tree, width: int) -> DocumentLayout:
         doc = self.convert_tree_to_document(tree)
-        return layout_document(doc, width)
+        return layout_document(doc, width, self._indent)

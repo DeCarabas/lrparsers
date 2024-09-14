@@ -580,7 +580,9 @@ class Harness:
             return []
 
         return (
-            wadler.layout_document(self.document, width).apply_to_source(self.source).splitlines()
+            wadler.layout_document(self.document, width, self.load_printer().indent())
+            .apply_to_source(self.source)
+            .splitlines()
         )
 
 
