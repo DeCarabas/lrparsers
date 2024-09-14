@@ -5,8 +5,10 @@ import typing
 from . import parser
 from . import runtime
 
-# TODO: I think I want a *force break*, i.e., a document which forces things
-# to not fit on one line.
+
+############################################################################
+# Documents
+############################################################################
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,13 +79,24 @@ class Lazy:
 Document = None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Marker | Lazy
 
 
+############################################################################
+# Layouts
+############################################################################
+
+
 class DocumentLayout:
+    """A structure that is trivially convertable to a string; the result of
+    layout out a document."""
+
     segments: list[str | tuple[int, int]]
 
     def __init__(self, segments):
         self.segments = segments
 
     def apply_to_source(self, original: str) -> str:
+        """Convert this layout to a string by copying chunks of the source
+        text into the right place.
+        """
         result = ""
         for segment in self.segments:
             if isinstance(segment, str):
@@ -98,8 +111,8 @@ class DocumentLayout:
 def layout_document(doc: Document, width: int) -> DocumentLayout:
     """Lay out a document to fit within the given width.
 
-    The result of this function is a layout which can trivially be converted
-    into a string given the original document.
+    The result of this function is a DocumentLayout which can trivially be
+    converted into a string given the original document.
     """
 
     @dataclasses.dataclass
@@ -252,8 +265,6 @@ def resolve_document(doc: Document) -> Document:
 
 
 def child_to_name(child: runtime.Tree | runtime.TokenValue) -> str:
-    # TODO: RECONSIDER THE EXISTENCE OF THIS FUNCTION
-    #       The naming condition is important but
     if isinstance(child, runtime.Tree):
         return f"tree_{child.name}"
     else:
