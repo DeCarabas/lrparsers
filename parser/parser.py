@@ -2724,10 +2724,34 @@ sp = newline(" ")
 
 
 def forced_break() -> Rule:
+    """Indicate that the line MUST break right here, for whatever reason."""
     return mark(Nothing, format=FormatMeta(forced_break=True))
 
 
 br = forced_break()
+
+
+class TriviaMode(enum.Enum):
+    """Indicate how a particular bit of trivia is to be handled during
+    pretty-printing. Attach this to a "trivia_mode" property on a Terminal
+    definition.
+
+    - Ignore means that the trivia should be ignored. (This is the default.)
+
+    - NewLine means that the trivia is a line break. This is important for
+      other modes, specifically...
+
+    - LineComment means that the trivia is a line comment. If a line comment
+      is alone on a line, then a forced break is inserted so that it remains
+      alone on its line after formatting, otherwise it is attached to whatever
+      is to its left by a single space. A LineComment is *always* followed by
+      a forced break.
+    """
+
+    Ignore = 0
+    NewLine = 1
+    LineComment = 2
+
 
 ###############################################################################
 # Finally, the base class for grammars

@@ -17,13 +17,6 @@ class Cons:
     right: "Document"
 
 
-def cons(left: "Document", right: "Document") -> "Document":
-    if left and right:
-        return Cons(left, right)
-    else:
-        return left or right
-
-
 @dataclasses.dataclass(frozen=True)
 class NewLine:
     replace: str
@@ -31,7 +24,7 @@ class NewLine:
 
 @dataclasses.dataclass(frozen=True)
 class ForceBreak:
-    pass
+    silent: bool
 
 
 @dataclasses.dataclass(frozen=True)
@@ -77,6 +70,21 @@ class Lazy:
 
 
 Document = None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Marker | Lazy
+
+
+def cons(*documents: Document) -> Document:
+    result = None
+    for doc in documents:
+        if result is None:
+            result = doc
+        elif doc is not None:
+            result = Cons(result, doc)
+
+    return result
+
+
+def group(document: Document) -> Document:
+    return Group(document)
 
 
 ############################################################################
@@ -125,7 +133,13 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
             return Chunk(doc=doc, indent=self.indent + and_indent, flat=self.flat)
 
     column = 0
-    chunks: list[Chunk] = [Chunk(doc=doc, indent=0, flat=False)]
+    chunks: list[Chunk] = [
+        Chunk(
+            doc=doc,
+            indent=0,
+            flat=False,  # NOTE: Assume flat until we know how to break.
+        )
+    ]
 
     def fits(chunk: Chunk) -> bool:
         remaining = width - column
@@ -216,10 +230,11 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
                     output.append("\n" + (chunk.indent * indent))
                     column = chunk.indent * len(indent)
 
-            case ForceBreak():
+            case ForceBreak(silent):
                 # TODO: Custom newline expansion, custom indent segments.
-                output.append("\n" + (chunk.indent * indent))
-                column = chunk.indent * len(indent)
+                if not silent:
+                    output.append("\n" + (chunk.indent * indent))
+                    column = chunk.indent * len(indent)
 
             case Cons(left, right):
                 chunks.append(chunk.with_document(right))
@@ -276,10 +291,17 @@ class Matcher:
     table: parser.ParseTable
     indent_amounts: dict[str, int]
     newline_replace: dict[str, str]
+    trivia_mode: dict[str, parser.TriviaMode]
 
     def match(self, printer: "Printer", items: list[runtime.Tree | runtime.TokenValue]) -> Document:
         stack: list[tuple[int, Document]] = [(0, None)]
         table = self.table
+
+        # eof_trivia = []
+        # if len(items) > 0:
+        #     item = items[-1]
+        #     if isinstance(item, runtime.TokenValue):
+        #         eof_trivia = item.post_trivia
 
         input = [(child_to_name(i), i) for i in items] + [
             (
@@ -302,7 +324,9 @@ class Matcher:
 
             match action:
                 case parser.Accept():
-                    return stack[-1][1]
+                    result = stack[-1][1]
+                    # result = cons(result, self.apply_trivia(eof_trivia))
+                    return result
 
                 case parser.Reduce(name=name, count=size):
                     child: Document = None
@@ -314,7 +338,7 @@ class Matcher:
                         del stack[-size:]
 
                     if name[0] == "g":
-                        child = Group(child)
+                        child = group(child)
 
                     elif name[0] == "i":
                         amount = self.indent_amounts[name]
@@ -329,10 +353,10 @@ class Matcher:
                         child = cons(NewLine(replace), child)
 
                     elif name[0] == "f":
-                        child = cons(child, ForceBreak())
+                        child = cons(child, ForceBreak(False))
 
                     elif name[0] == "d":
-                        child = cons(ForceBreak(), child)
+                        child = cons(ForceBreak(False), child)
 
                     else:
                         pass  # Reducing a transparent rule probably.
@@ -347,14 +371,55 @@ class Matcher:
                     if isinstance(value, runtime.Tree):
                         child = Lazy.from_tree(value, printer)
                     else:
-                        # TODO: Consider trivia and preserve comments!
                         child = Text(value.start, value.end)
+                        child = cons(child, self.apply_trivia(value.post_trivia))
 
                     stack.append((action.state, child))
                     input_index += 1
 
                 case parser.Error():
                     raise Exception("How did I get a parse error here??")
+
+    def apply_trivia(self, trivia: list[runtime.TokenValue]) -> Document:
+        had_newline = False
+        trivia_doc = None
+        for token in trivia:
+            mode = self.trivia_mode.get(token.kind, parser.TriviaMode.Ignore)
+            match mode:
+                case parser.TriviaMode.Ignore:
+                    pass
+
+                case parser.TriviaMode.NewLine:
+                    # We ignore line breaks because obviously
+                    # we expect the pretty-printer to put the
+                    # line breaks in where they belong *but*
+                    # we track if they happened to influence
+                    # the layout.
+                    had_newline = True
+
+                case parser.TriviaMode.LineComment:
+                    if had_newline:
+                        # This line comment is all alone on
+                        # its line, so we need to maintain
+                        # that.
+                        line_break = NewLine("")
+                    else:
+                        # This line comment is attached to
+                        # something to the left, reduce it to
+                        # a space.
+                        line_break = Literal(" ")
+
+                    trivia_doc = cons(
+                        trivia_doc,
+                        line_break,
+                        Text(token.start, token.end),
+                        ForceBreak(True),  # This is probably the wrong place for this!
+                    )
+
+                case _:
+                    typing.assert_never(mode)
+
+        return trivia_doc
 
 
 class Printer:
@@ -364,6 +429,7 @@ class Printer:
     _matchers: dict[str, Matcher]
     _nonterminals: dict[str, parser.NonTerminal]
     _indent: str
+    _trivia_mode: dict[str, parser.TriviaMode]
 
     def __init__(self, grammar: parser.Grammar, indent: str | None = None):
         self.grammar = grammar
@@ -371,8 +437,17 @@ class Printer:
         self._matchers = {}
 
         if indent is None:
-            indent = getattr(self.grammar, "pretty_indent", " ")
+            indent = getattr(self.grammar, "pretty_indent", None)
+        if indent is None:
+            indent = " "
         self._indent = indent
+
+        trivia_mode = {}
+        for t in grammar.terminals():
+            mode = t.meta.get("trivia_mode")
+            if t.name is not None and isinstance(mode, parser.TriviaMode):
+                trivia_mode[t.name] = mode
+        self._trivia_mode = trivia_mode
 
     def indent(self) -> str:
         return self._indent
@@ -535,6 +610,7 @@ class Printer:
             parse_table,
             indent_amounts,
             final_newlines,
+            self._trivia_mode,
         )
 
     def rule_to_matcher(self, rule: parser.NonTerminal) -> Matcher:

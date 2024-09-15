@@ -543,12 +543,12 @@ class Harness:
 
             case wadler.Text(start, end):
                 if self.source is not None:
-                    append(f"< {self.source[start:end]}")
+                    append(f"< {repr(self.source[start:end])}")
                 else:
                     append(f"< ??? {start}:{end}")
 
             case wadler.Literal(text):
-                append(f"' {text}")
+                append(f"literal {repr(text)}")
 
             case wadler.Group():
                 append("group")

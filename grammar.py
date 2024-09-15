@@ -5,6 +5,7 @@ from parser import (
     Re,
     Rule,
     Terminal,
+    TriviaMode,
     alt,
     br,
     group,
@@ -23,7 +24,7 @@ class FineGrammar(Grammar):
     # generator = parser.GenerateLR1
     start = "File"
 
-    trivia = ["BLANKS", "COMMENT"]
+    trivia = ["BLANKS", "LINE_BREAKS", "COMMENT"]
 
     pretty_indent = "  "
 
@@ -76,12 +77,10 @@ class FineGrammar(Grammar):
     def class_declaration(self) -> Rule:
         return seq(
             group(
-                group(
-                    self.CLASS,
-                    sp,
-                    mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.type),
-                    sp,
-                ),
+                self.CLASS,
+                sp,
+                mark(self.IDENTIFIER, field="name", highlight=highlight.entity.name.type),
+                sp,
                 self.LCURLY,
             ),
             indent(nl, mark(opt(self.class_body), field="body")),
@@ -193,7 +192,7 @@ class FineGrammar(Grammar):
     def block(self) -> Rule:
         return alt(
             group(self.LCURLY, nl, self.RCURLY),
-            seq(self.LCURLY, indent(nl, self.block_body), nl, self.RCURLY),
+            group(self.LCURLY, indent(sp, self.block_body), sp, self.RCURLY),
         )
 
     @rule("BlockBody")
@@ -201,7 +200,7 @@ class FineGrammar(Grammar):
         return alt(
             self.expression,
             self._statement_list,
-            seq(self._statement_list, nl, self.expression),
+            seq(self._statement_list, br, self.expression),
         )
 
     @rule
@@ -420,10 +419,12 @@ class FineGrammar(Grammar):
     def field_value(self) -> Rule:
         return self.IDENTIFIER | group(self.IDENTIFIER, self.COLON, indent(sp, self.expression))
 
-    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+    BLANKS = Terminal(Re.set(" ", "\t").plus())
+    LINE_BREAKS = Terminal(Re.set("\r", "\n").plus(), trivia_mode=TriviaMode.NewLine)
     COMMENT = Terminal(
         Re.seq(Re.literal("//"), Re.set("\n").invert().star()),
         highlight=highlight.comment.line,
+        trivia_mode=TriviaMode.LineComment,
     )
 
     ARROW = Terminal("->", highlight=highlight.keyword.operator)
