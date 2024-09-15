@@ -11,8 +11,6 @@ from parser.parser import (
     alt,
     indent,
     seq,
-    Rule,
-    Assoc,
     sp,
     nl,
     br,
@@ -129,9 +127,14 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
         case wadler.Lazy():
             return flatten_document(doc.resolve(), src)
         case wadler.Cons():
-            return flatten_document(doc.left, src) + flatten_document(doc.right, src)
+            result = []
+            for d in doc.docs:
+                result += flatten_document(d, src)
+            return result
         case None:
             return []
+        case wadler.Marker():
+            return [f"<marker {repr(doc.meta)}>", flatten_document(doc.child, src)]
         case _:
             typing.assert_never(doc)
 

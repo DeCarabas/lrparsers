@@ -558,8 +558,8 @@ class Harness:
                 self.format_document(lines, doc.resolve(), indent)
 
             case wadler.Cons():
-                self.format_document(lines, doc.left, indent)
-                self.format_document(lines, doc.right, indent)
+                for child in doc.docs:
+                    self.format_document(lines, child, indent)
 
             case wadler.Marker():
                 append("Marker")

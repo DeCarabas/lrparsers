@@ -13,8 +13,7 @@ from . import runtime
 
 @dataclasses.dataclass(frozen=True)
 class Cons:
-    left: "Document"
-    right: "Document"
+    docs: list["Document"]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,14 +72,19 @@ Document = None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group 
 
 
 def cons(*documents: Document) -> Document:
-    result = None
-    for doc in documents:
-        if result is None:
-            result = doc
-        elif doc is not None:
-            result = Cons(result, doc)
+    if len(documents) == 0:
+        return None
 
-    return result
+    result = []
+    for document in documents:
+        if isinstance(document, Cons):
+            result.extend(document.docs)
+        elif document is not None:
+            result.append(document)
+
+    if len(result) == 0:
+        return None
+    return Cons(result)
 
 
 def group(document: Document) -> Document:
@@ -174,9 +178,8 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
                     # line and yes, whatever you were asking about has fit.
                     return not chunk.flat
 
-                case Cons(left, right):
-                    stack.append(chunk.with_document(right))
-                    stack.append(chunk.with_document(left))
+                case Cons(docs):
+                    stack.extend(chunk.with_document(doc) for doc in reversed(docs))
 
                 case Lazy():
                     stack.append(chunk.with_document(chunk.doc.resolve()))
@@ -236,9 +239,8 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
                     output.append("\n" + (chunk.indent * indent))
                     column = chunk.indent * len(indent)
 
-            case Cons(left, right):
-                chunks.append(chunk.with_document(right))
-                chunks.append(chunk.with_document(left))
+            case Cons(docs):
+                chunks.extend(chunk.with_document(doc) for doc in reversed(docs))
 
             case Indent(amount, doc):
                 chunks.append(chunk.with_document(doc, and_indent=amount))
@@ -264,19 +266,24 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
 
 def resolve_document(doc: Document) -> Document:
     match doc:
-        case Cons(left, right):
-            lr = resolve_document(left)
-            rr = resolve_document(right)
-            if lr is not left or rr is not right:
-                return cons(lr, rr)
-            else:
-                return doc
+        case Cons(docs):
+            docs = [resolve_document(d) for d in docs]
+            return cons(*docs)
 
         case Lazy(_):
             return resolve_document(doc.resolve())
 
-        case _:
+        case Group(doc):
+            return group(resolve_document(doc))
+
+        case Marker(child, meta):
+            return Marker(resolve_document(child), meta)
+
+        case Text() | Literal() | NewLine() | ForceBreak() | Indent() | None:
             return doc
+
+        case _:
+            typing.assert_never(doc)
 
 
 def child_to_name(child: runtime.Tree | runtime.TokenValue) -> str:
