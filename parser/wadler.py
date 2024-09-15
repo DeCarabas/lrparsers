@@ -54,6 +54,11 @@ class Marker:
     meta: dict
 
 
+@dataclasses.dataclass(frozen=True)
+class Trivia:
+    child: "Document"
+
+
 @dataclasses.dataclass
 class Lazy:
     value: typing.Callable[[], "Document"] | "Document"
@@ -68,12 +73,16 @@ class Lazy:
         return Lazy(lambda: printer.convert_tree_to_document(tree))
 
 
-Document = None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Marker | Lazy
+Document = (
+    None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Trivia | Marker | Lazy
+)
 
 
 def cons(*documents: Document) -> Document:
     if len(documents) == 0:
         return None
+
+    # TODO: Merge adjacent trivia together?
 
     result = []
     for document in documents:
@@ -84,11 +93,51 @@ def cons(*documents: Document) -> Document:
 
     if len(result) == 0:
         return None
+    if len(result) == 1:
+        return result[0]
+
     return Cons(result)
 
 
 def group(document: Document) -> Document:
-    return Group(document)
+    if document is None:
+        return None
+
+    if isinstance(document, Cons):
+        children = list(document.docs)
+    else:
+        children = [document]
+
+    # Split the trivia off the left and right of the incoming group: trivia
+    # at the edges shouldn't affect the inside of the group.
+    right_trivia: list[Document] = []
+    while len(children) > 0 and isinstance(children[-1], Trivia):
+        right_trivia.append(children.pop())
+
+    children.reverse()
+    left_trivia: list[Document] = []
+    while len(children) > 0 and isinstance(children[-1], Trivia):
+        left_trivia.append(children.pop())
+
+    # IF we still have more than one child, *then* we can actually make a
+    # group. (A group with one child is a waste. A group with no children
+    # doubly so.)
+    children.reverse()
+    if len(children) > 1:
+        children = [Group(cons(*children))]
+
+    results = left_trivia + children + right_trivia
+    return cons(*results)
+
+
+def trivia(document: Document) -> Document:
+    if document is None:
+        return None
+
+    if isinstance(document, Trivia):
+        return document
+
+    return Trivia(document)
 
 
 ############################################################################
@@ -201,6 +250,9 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
                 case Marker():
                     stack.append(chunk.with_document(chunk.doc.child))
 
+                case Trivia(child):
+                    stack.append(chunk.with_document(child))
+
                 case _:
                     typing.assert_never(chunk.doc)
 
@@ -258,6 +310,9 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
             case Marker():
                 chunks.append(chunk.with_document(chunk.doc.child))
 
+            case Trivia(child):
+                chunks.append(chunk.with_document(child))
+
             case _:
                 typing.assert_never(chunk)
 
@@ -278,6 +333,9 @@ def resolve_document(doc: Document) -> Document:
 
         case Marker(child, meta):
             return Marker(resolve_document(child), meta)
+
+        case Trivia(child):
+            return Trivia(resolve_document(child))
 
         case Text() | Literal() | NewLine() | ForceBreak() | Indent() | None:
             return doc
@@ -387,10 +445,10 @@ class Matcher:
                 case parser.Error():
                     raise Exception("How did I get a parse error here??")
 
-    def apply_trivia(self, trivia: list[runtime.TokenValue]) -> Document:
-        had_newline = False
+    def apply_trivia(self, trivia_tokens: list[runtime.TokenValue]) -> Document:
+        has_newline = False
         trivia_doc = None
-        for token in trivia:
+        for token in trivia_tokens:
             mode = self.trivia_mode.get(token.kind, parser.TriviaMode.Ignore)
             match mode:
                 case parser.TriviaMode.Ignore:
@@ -402,10 +460,10 @@ class Matcher:
                     # line breaks in where they belong *but*
                     # we track if they happened to influence
                     # the layout.
-                    had_newline = True
+                    has_newline = True
 
                 case parser.TriviaMode.LineComment:
-                    if had_newline:
+                    if has_newline:
                         # This line comment is all alone on
                         # its line, so we need to maintain
                         # that.
@@ -426,7 +484,7 @@ class Matcher:
                 case _:
                     typing.assert_never(mode)
 
-        return trivia_doc
+        return trivia(trivia_doc)
 
 
 class Printer:

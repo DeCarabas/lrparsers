@@ -135,6 +135,8 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
             return []
         case wadler.Marker():
             return [f"<marker {repr(doc.meta)}>", flatten_document(doc.child, src)]
+        case wadler.Trivia():
+            return [f"<trivia>", flatten_document(doc.child, src)]
         case _:
             typing.assert_never(doc)
 

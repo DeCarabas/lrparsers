@@ -569,6 +569,10 @@ class Harness:
                 append("child", 1)
                 self.format_document(lines, doc.child, indent + 2)
 
+            case wadler.Trivia():
+                append("trivia")
+                self.format_document(lines, doc.child, indent + 1)
+
             case None:
                 pass
 

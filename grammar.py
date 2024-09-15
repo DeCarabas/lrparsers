@@ -192,7 +192,7 @@ class FineGrammar(Grammar):
     def block(self) -> Rule:
         return alt(
             group(self.LCURLY, nl, self.RCURLY),
-            group(self.LCURLY, indent(sp, self.block_body), sp, self.RCURLY),
+            group(self.LCURLY, indent(br, self.block_body), sp, self.RCURLY),
         )
 
     @rule("BlockBody")
@@ -222,10 +222,14 @@ class FineGrammar(Grammar):
     @rule("LetStatement")
     def let_statement(self) -> Rule:
         return group(
-            self.LET,
-            sp,
-            self.IDENTIFIER,
-            indent(sp, self.EQUAL, indent(sp, group(self.expression, self.SEMICOLON))),
+            group(
+                self.LET,
+                sp,
+                self.IDENTIFIER,
+                sp,
+                self.EQUAL,
+            ),
+            indent(sp, self.expression, self.SEMICOLON),
         )
 
     @rule("ReturnStatement")
@@ -266,19 +270,21 @@ class FineGrammar(Grammar):
     @rule("BinaryExpression")
     def binary_expression(self) -> Rule:
         return alt(
-            group(self.expression, sp, self.EQUAL, sp, self.expression),
-            group(self.expression, sp, self.OR, sp, self.expression),
-            group(self.expression, sp, self.AND, sp, self.expression),
-            group(self.expression, sp, self.EQUALEQUAL, sp, self.expression),
-            group(self.expression, sp, self.BANGEQUAL, sp, self.expression),
-            group(self.expression, sp, self.LESS, sp, self.expression),
-            group(self.expression, sp, self.LESSEQUAL, sp, self.expression),
-            group(self.expression, sp, self.GREATER, sp, self.expression),
-            group(self.expression, sp, self.GREATEREQUAL, sp, self.expression),
-            group(self.expression, sp, self.PLUS, sp, self.expression),
-            group(self.expression, sp, self.MINUS, sp, self.expression),
-            group(self.expression, sp, self.STAR, sp, self.expression),
-            group(self.expression, sp, self.SLASH, sp, self.expression),
+            # Assignment gets special indentation.
+            group(group(self.expression, sp, self.EQUAL), indent(sp, self.expression)),
+            # Other ones do not.
+            group(group(self.expression, sp, self.OR), sp, self.expression),
+            group(group(self.expression, sp, self.AND), sp, self.expression),
+            group(group(self.expression, sp, self.EQUALEQUAL), sp, self.expression),
+            group(group(self.expression, sp, self.BANGEQUAL), sp, self.expression),
+            group(group(self.expression, sp, self.LESS), sp, self.expression),
+            group(group(self.expression, sp, self.LESSEQUAL), sp, self.expression),
+            group(group(self.expression, sp, self.GREATER), sp, self.expression),
+            group(group(self.expression, sp, self.GREATEREQUAL), sp, self.expression),
+            group(group(self.expression, sp, self.PLUS), sp, self.expression),
+            group(group(self.expression, sp, self.MINUS), sp, self.expression),
+            group(group(self.expression, sp, self.STAR), sp, self.expression),
+            group(group(self.expression, sp, self.SLASH), sp, self.expression),
         )
 
     @rule("IsExpression")
