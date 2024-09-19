@@ -2109,6 +2109,10 @@ class Re:
 UNICODE_MAX_CP = 1114112
 
 
+def _str_repr(x: int) -> str:
+    return repr(chr(x))[1:-1]
+
+
 @dataclasses.dataclass
 class ReSet(Re):
     values: list[Span]
@@ -2165,12 +2169,12 @@ class ReSet(Re):
         if len(self.values) == 1:
             span = self.values[0]
             if len(span) == 1:
-                return chr(span.lower)
+                return _str_repr(span.lower)
 
         ranges = []
         for span in self.values:
-            start = chr(span.lower)
-            end = chr(span.upper - 1)
+            start = _str_repr(span.lower)
+            end = _str_repr(span.upper - 1)
             if start == end:
                 ranges.append(start)
             else:
@@ -2736,7 +2740,7 @@ class TriviaMode(enum.Enum):
     pretty-printing. Attach this to a "trivia_mode" property on a Terminal
     definition.
 
-    - Ignore means that the trivia should be ignored. (This is the default.)
+    - Blank means that the trivia represents blank space. (This is the default.)
 
     - NewLine means that the trivia is a line break. This is important for
       other modes, specifically...
@@ -2748,7 +2752,7 @@ class TriviaMode(enum.Enum):
       a forced break.
     """
 
-    Ignore = 0
+    Blank = 0
     NewLine = 1
     LineComment = 2
 

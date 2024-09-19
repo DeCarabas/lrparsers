@@ -33,12 +33,6 @@ class Indent:
 
 
 @dataclasses.dataclass(frozen=True)
-class Text:
-    start: int
-    end: int
-
-
-@dataclasses.dataclass(frozen=True)
 class Literal:
     text: str
 
@@ -69,13 +63,11 @@ class Lazy:
         return self.value
 
     @classmethod
-    def from_tree(cls, tree: runtime.Tree, printer: "Printer") -> "Lazy":
-        return Lazy(lambda: printer.convert_tree_to_document(tree))
+    def from_tree(cls, tree: runtime.Tree, src: str, printer: "Printer") -> "Lazy":
+        return Lazy(lambda: printer.convert_tree_to_document(tree, src))
 
 
-Document = (
-    None | Text | Literal | NewLine | ForceBreak | Cons | Indent | Group | Trivia | Marker | Lazy
-)
+Document = None | Literal | NewLine | ForceBreak | Cons | Indent | Group | Trivia | Marker | Lazy
 
 
 def cons(*documents: Document) -> Document:
@@ -207,9 +199,6 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
                 case None:
                     pass
 
-                case Text(start, end):
-                    remaining -= end - start
-
                 case Literal(text):
                     remaining -= len(text)
 
@@ -267,10 +256,6 @@ def layout_document(doc: Document, width: int, indent: str) -> DocumentLayout:
         match chunk.doc:
             case None:
                 pass
-
-            case Text(start, end):
-                output.append((start, end))
-                column += end - start
 
             case Literal(text):
                 output.append(text)
@@ -337,7 +322,7 @@ def resolve_document(doc: Document) -> Document:
         case Trivia(child):
             return Trivia(resolve_document(child))
 
-        case Text() | Literal() | NewLine() | ForceBreak() | Indent() | None:
+        case Literal() | NewLine() | ForceBreak() | Indent() | None:
             return doc
 
         case _:
@@ -358,7 +343,12 @@ class Matcher:
     newline_replace: dict[str, str]
     trivia_mode: dict[str, parser.TriviaMode]
 
-    def match(self, printer: "Printer", items: list[runtime.Tree | runtime.TokenValue]) -> Document:
+    def match(
+        self,
+        printer: "Printer",
+        items: list[runtime.Tree | runtime.TokenValue],
+        src: str,
+    ) -> Document:
         stack: list[tuple[int, Document]] = [(0, None)]
         table = self.table
 
@@ -434,10 +424,13 @@ class Matcher:
                     value = current_token[1]
 
                     if isinstance(value, runtime.Tree):
-                        child = Lazy.from_tree(value, printer)
+                        child = Lazy.from_tree(value, src, printer)
                     else:
-                        child = Text(value.start, value.end)
-                        child = cons(child, self.apply_trivia(value.post_trivia))
+                        child = cons(
+                            trivia(self.apply_pre_trivia(value.pre_trivia, src)),
+                            Literal(src[value.start : value.end]),
+                            trivia(self.apply_post_trivia(value.post_trivia, src)),
+                        )
 
                     stack.append((action.state, child))
                     input_index += 1
@@ -445,46 +438,100 @@ class Matcher:
                 case parser.Error():
                     raise Exception("How did I get a parse error here??")
 
-    def apply_trivia(self, trivia_tokens: list[runtime.TokenValue]) -> Document:
-        has_newline = False
+    def slice_pre_post_trivia(self, trivia_tokens: list[runtime.TokenValue], src: str) -> tuple[
+        list[tuple[parser.TriviaMode, runtime.TokenValue]],
+        list[tuple[parser.TriviaMode, runtime.TokenValue]],
+    ]:
+        tokens = [
+            (self.trivia_mode.get(token.kind, parser.TriviaMode.Blank), token)
+            for token in trivia_tokens
+        ]
+
+        for index, (mode, token) in enumerate(tokens):
+            if token.start == 0:
+                # Everything is pre-trivia if we're at the start of the file.
+                return (tokens, [])
+
+            if mode == parser.TriviaMode.NewLine:
+                # This is the first newline; it belongs with the post-trivia.
+                return (tokens[index + 1 :], tokens[: index + 1])
+
+        # If we never found a new line then it's all post-trivia.
+        return ([], tokens)
+
+    def apply_pre_trivia(self, trivia_tokens: list[runtime.TokenValue], src: str) -> Document:
+        pre_trivia, _ = self.slice_pre_post_trivia(trivia_tokens, src)
+        if len(pre_trivia) == 0:
+            return None
+
+        at_start_of_file = pre_trivia[0][1].start == 0
+
         trivia_doc = None
-        for token in trivia_tokens:
-            mode = self.trivia_mode.get(token.kind, parser.TriviaMode.Ignore)
+        new_line_count = 0
+        for mode, token in pre_trivia:
             match mode:
-                case parser.TriviaMode.Ignore:
+                case parser.TriviaMode.LineComment:
+                    trivia_doc = cons(
+                        trivia_doc,
+                        Literal(src[token.start : token.end]),
+                        ForceBreak(False),
+                    )
+                    new_line_count = 0  # There will be a newline after this.
+                    at_start_of_file = False
+
+                case parser.TriviaMode.Blank:
                     pass
 
                 case parser.TriviaMode.NewLine:
-                    # We ignore line breaks because obviously
-                    # we expect the pretty-printer to put the
-                    # line breaks in where they belong *but*
-                    # we track if they happened to influence
-                    # the layout.
-                    has_newline = True
-
-                case parser.TriviaMode.LineComment:
-                    if has_newline:
-                        # This line comment is all alone on
-                        # its line, so we need to maintain
-                        # that.
-                        line_break = NewLine("")
-                    else:
-                        # This line comment is attached to
-                        # something to the left, reduce it to
-                        # a space.
-                        line_break = Literal(" ")
-
-                    trivia_doc = cons(
-                        trivia_doc,
-                        line_break,
-                        Text(token.start, token.end),
-                        ForceBreak(True),  # This is probably the wrong place for this!
-                    )
+                    new_line_count += 1
+                    if new_line_count == 2 and not at_start_of_file:
+                        trivia_doc = cons(
+                            trivia_doc,
+                            ForceBreak(False),
+                            ForceBreak(False),
+                        )
 
                 case _:
                     typing.assert_never(mode)
 
-        return trivia(trivia_doc)
+        return trivia_doc
+
+    def apply_post_trivia(self, trivia_tokens: list[runtime.TokenValue], src: str) -> Document:
+        _, post_trivia = self.slice_pre_post_trivia(trivia_tokens, src)
+        if len(post_trivia) == 0:
+            return None
+
+        trivia_doc = None
+        for mode, token in post_trivia:
+            match mode:
+                case parser.TriviaMode.Blank:
+                    pass
+
+                case parser.TriviaMode.NewLine:
+                    # Anything after a line break is not processed as post
+                    # trivia.
+                    break
+
+                case parser.TriviaMode.LineComment:
+                    # Because this is post-trivia, we know there's something
+                    # to our left, and we can force the space.
+                    trivia_doc = cons(
+                        Literal(" "),
+                        Literal(src[token.start : token.end]),
+                        ForceBreak(True),  # And the line needs to end.
+                    )
+                    break
+
+                case _:
+                    typing.assert_never(mode)
+
+        if len(trivia_tokens) > 0 and trivia_tokens[-1].end == len(src):
+            # As a special case, if we're post trivia at the end of the file
+            # then we also need to be pre-trivia too, for the hypthetical EOF
+            # token that we never see.
+            trivia_doc = cons(trivia_doc, self.apply_pre_trivia(trivia_tokens, src))
+
+        return trivia_doc
 
 
 class Printer:
@@ -686,19 +733,19 @@ class Printer:
 
         return result
 
-    def convert_tree_to_document(self, tree: runtime.Tree) -> Document:
+    def convert_tree_to_document(self, tree: runtime.Tree, src: str) -> Document:
         name = tree.name
         assert name is not None, "Cannot format a tree if it still has transparent nodes inside"
 
         rule = self.lookup_nonterminal(name)
         matcher = self.rule_to_matcher(rule)
-        m = matcher.match(self, list(tree.children))
+        m = matcher.match(self, list(tree.children), src)
         if m is None:
             raise ValueError(
                 f"Could not match a valid tree for {tree.name} with {len(tree.children)} children:\n{tree.format()}"
             )
         return resolve_document(m)
 
-    def format_tree(self, tree: runtime.Tree, width: int) -> DocumentLayout:
-        doc = self.convert_tree_to_document(tree)
+    def format_tree(self, tree: runtime.Tree, src: str, width: int) -> DocumentLayout:
+        doc = self.convert_tree_to_document(tree, src)
         return layout_document(doc, width, self._indent)

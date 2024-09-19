@@ -24,7 +24,7 @@ class FineGrammar(Grammar):
     # generator = parser.GenerateLR1
     start = "File"
 
-    trivia = ["BLANKS", "LINE_BREAKS", "COMMENT"]
+    trivia = ["BLANKS", "LINE_BREAK", "COMMENT"]
 
     pretty_indent = "  "
 
@@ -426,7 +426,7 @@ class FineGrammar(Grammar):
         return self.IDENTIFIER | group(self.IDENTIFIER, self.COLON, indent(sp, self.expression))
 
     BLANKS = Terminal(Re.set(" ", "\t").plus())
-    LINE_BREAKS = Terminal(Re.set("\r", "\n").plus(), trivia_mode=TriviaMode.NewLine)
+    LINE_BREAK = Terminal(Re.set("\r", "\n"), trivia_mode=TriviaMode.NewLine)
     COMMENT = Terminal(
         Re.seq(Re.literal("//"), Re.set("\n").invert().star()),
         highlight=highlight.comment.line,

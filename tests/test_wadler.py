@@ -14,6 +14,7 @@ from parser.parser import (
     sp,
     nl,
     br,
+    TriviaMode,
 )
 
 import parser.runtime as runtime
@@ -72,6 +73,7 @@ class JsonGrammar(Grammar):
         )
 
     BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+
     LCURLY = Terminal("{")
     RCURLY = Terminal("}")
     COMMA = Terminal(",")
@@ -118,8 +120,6 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
             return ["<forced break>"]
         case wadler.Indent():
             return [[f"<indent {doc.amount}>", flatten_document(doc.doc, src)]]
-        case wadler.Text(start, end):
-            return [src[start:end]]
         case wadler.Literal(text):
             return [text]
         case wadler.Group():
@@ -149,7 +149,7 @@ def test_convert_tree_to_document():
     assert tree is not None
 
     printer = wadler.Printer(JSON)
-    doc = flatten_document(printer.convert_tree_to_document(tree), text)
+    doc = flatten_document(printer.convert_tree_to_document(tree, text), text)
 
     assert doc == [
         [
@@ -212,7 +212,7 @@ def test_layout_basic():
     assert tree is not None
 
     printer = wadler.Printer(JSON)
-    result = printer.format_tree(tree, 50).apply_to_source(text)
+    result = printer.format_tree(tree, text, 50).apply_to_source(text)
 
     assert (
         result
@@ -226,38 +226,44 @@ def test_layout_basic():
     )
 
 
+class TG(Grammar):
+    start = "root"
+    trivia = ["BLANKS", "LINE_BREAK", "COMMENT"]
+
+    @rule
+    def root(self):
+        return self._expression
+
+    @rule
+    def _expression(self):
+        return self.word | self.list
+
+    @rule
+    def list(self):
+        return group(self.LPAREN, indent(nl, self._expressions), nl, self.RPAREN)
+
+    @rule
+    def _expressions(self):
+        return self._expression | seq(self._expressions, sp, self._expression)
+
+    @rule
+    def word(self):
+        return self.OK | seq(self.BREAK, br, self.BREAK)
+
+    LPAREN = Terminal("(")
+    RPAREN = Terminal(")")
+    OK = Terminal("ok")
+    BREAK = Terminal("break")
+
+    BLANKS = Terminal(Re.set(" ", "\t").plus())
+    LINE_BREAK = Terminal(Re.set("\r", "\n"), trivia_mode=TriviaMode.NewLine)
+    COMMENT = Terminal(
+        Re.seq(Re.literal(";"), Re.set("\n").invert().star()),
+        trivia_mode=TriviaMode.LineComment,
+    )
+
+
 def test_forced_break():
-    class TG(Grammar):
-        start = "root"
-        trivia = ["BLANKS"]
-
-        @rule
-        def root(self):
-            return self._expression
-
-        @rule
-        def _expression(self):
-            return self.word | self.list
-
-        @rule
-        def list(self):
-            return group(self.LPAREN, indent(nl, self._expressions), nl, self.RPAREN)
-
-        @rule
-        def _expressions(self):
-            return self._expression | seq(self._expressions, sp, self._expression)
-
-        @rule
-        def word(self):
-            return self.OK | seq(self.BREAK, br, self.BREAK)
-
-        LPAREN = Terminal("(")
-        RPAREN = Terminal(")")
-        OK = Terminal("ok")
-        BREAK = Terminal("break")
-
-        BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
-
     g = TG()
     g_lexer = g.compile_lexer()
     g_parser = runtime.Parser(g.build_table())
@@ -269,7 +275,7 @@ def test_forced_break():
     assert tree is not None
 
     printer = wadler.Printer(g)
-    result = printer.format_tree(tree, 200).apply_to_source(text)
+    result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert (
         result

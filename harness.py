@@ -371,7 +371,7 @@ class Harness:
 
             printer = self.load_printer()
             if self.tree is not None:
-                self.document = printer.convert_tree_to_document(self.tree)
+                self.document = printer.convert_tree_to_document(self.tree, self.source)
             else:
                 self.document = None
 
@@ -540,12 +540,6 @@ class Harness:
             case wadler.Indent():
                 append(f"indent {doc.amount}")
                 self.format_document(lines, doc.doc, indent + 1)
-
-            case wadler.Text(start, end):
-                if self.source is not None:
-                    append(f"< {repr(self.source[start:end])}")
-                else:
-                    append(f"< ??? {start}:{end}")
 
             case wadler.Literal(text):
                 append(f"literal {repr(text)}")
