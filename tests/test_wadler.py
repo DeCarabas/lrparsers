@@ -2,6 +2,7 @@ import typing
 
 from parser.parser import (
     Grammar,
+    ParseTable,
     Re,
     Terminal,
     rule,
@@ -117,7 +118,7 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
         case wadler.NewLine(replace):
             return [f"<newline {repr(replace)}>"]
         case wadler.ForceBreak():
-            return ["<forced break>"]
+            return [f"<forced break silent={doc.silent}>"]
         case wadler.Indent():
             return [[f"<indent {doc.amount}>", flatten_document(doc.doc, src)]]
         case wadler.Literal(text):
@@ -204,6 +205,10 @@ def test_convert_tree_to_document():
     ]
 
 
+def _output(txt: str) -> str:
+    return txt.strip().replace("*SPACE*", " ").replace("*NEWLINE*", "\n")
+
+
 def test_layout_basic():
     text = '{"a": true, "b":[1,2,3], "c":[1,2,3,4,5,6,7]}'
     tokens = runtime.GenericTokenStream(text, JSON_LEXER)
@@ -214,15 +219,14 @@ def test_layout_basic():
     printer = wadler.Printer(JSON)
     result = printer.format_tree(tree, text, 50).apply_to_source(text)
 
-    assert (
-        result
-        == """
+    assert result == _output(
+        """
 {
  "a": true,
  "b": [1, 2, 3],
  "c": [1, 2, 3, 4, 5, 6, 7]
 }
-""".strip()
+"""
     )
 
 
@@ -277,9 +281,8 @@ def test_forced_break():
     printer = wadler.Printer(g)
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
-    assert (
-        result
-        == """
+    assert result == _output(
+        """
 (
  (ok ok)
  (
@@ -290,5 +293,159 @@ def test_forced_break():
  )
  (ok ok ok ok)
 )
-    """.strip()
+    """
     )
+
+
+def test_maintaining_line_breaks():
+    g = TG()
+    g_lexer = g.compile_lexer()
+    g_parser = runtime.Parser(g.build_table())
+
+    text = """((ok ok)
+; Don't break here.
+(ok)
+
+; ^ Do keep this break though.
+(ok)
+
+
+
+; ^ This should only be one break.
+(ok))"""
+
+    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    assert errors == []
+    assert tree is not None
+
+    printer = wadler.Printer(g)
+    result = printer.format_tree(tree, text, 200).apply_to_source(text)
+
+    assert result == _output(
+        """
+(
+ (ok ok)
+ ; Don't break here.
+ (ok)
+*SPACE*
+ ; ^ Do keep this break though.
+ (ok)
+*SPACE*
+ ; ^ This should only be one break.
+ (ok)
+)
+    """
+    )
+
+
+def test_trailing_trivia():
+    g = TG()
+    g_lexer = g.compile_lexer()
+    g_parser = runtime.Parser(g.build_table())
+
+    text = """((ok ok)); Don't lose this!
+
+; Or this!
+    """
+
+    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    assert errors == []
+    assert tree is not None
+
+    printer = wadler.Printer(g)
+    result = printer.format_tree(tree, text, 200).apply_to_source(text)
+
+    assert result == _output(
+        """
+((ok ok)) ; Don't lose this!
+
+; Or this!*NEWLINE*
+"""
+    )
+
+
+def test_trailing_trivia_two():
+    g = TG()
+    g_lexer = g.compile_lexer()
+    g_parser = runtime.Parser(g.build_table())
+
+    text = """((ok ok))
+
+; Or this!
+    """
+
+    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    assert errors == []
+    assert tree is not None
+
+    printer = wadler.Printer(g)
+    result = printer.format_tree(tree, text, 200).apply_to_source(text)
+
+    assert result == _output(
+        """
+((ok ok))
+
+; Or this!*NEWLINE*
+"""
+    )
+
+
+def test_trailing_trivia_split():
+    g = TG()
+    g_lexer = g.compile_lexer()
+    g_parser = runtime.Parser(g.build_table())
+
+    text = """((ok ok)); Don't lose this!
+
+; Or this!
+    """
+
+    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    assert errors == []
+    assert tree is not None
+
+    def rightmost(t: runtime.Tree | runtime.TokenValue) -> runtime.TokenValue | None:
+        if isinstance(t, runtime.TokenValue):
+            return t
+
+        for child in reversed(t.children):
+            result = rightmost(child)
+            if result is not None:
+                return result
+
+        return None
+
+    token = rightmost(tree)
+    assert token is not None
+
+    TRIVIA_MODES = {
+        "BLANKS": TriviaMode.Blank,
+        "LINE_BREAK": TriviaMode.NewLine,
+        "COMMENT": TriviaMode.LineComment,
+    }
+
+    pre_trivia, post_trivia = wadler.slice_pre_post_trivia(TRIVIA_MODES, token.post_trivia)
+    for mode, t in pre_trivia:
+        print(f"{mode:25} {t.kind:10}  {repr(text[t.start:t.end])}")
+    print("-----")
+    for mode, t in post_trivia:
+        print(f"{mode:25} {t.kind:10}  {repr(text[t.start:t.end])}")
+
+    trivia_doc = wadler.Matcher(
+        ParseTable([], [], set()),
+        {},
+        {},
+        TRIVIA_MODES,
+    ).apply_post_trivia(
+        token.post_trivia,
+        text,
+    )
+
+    assert flatten_document(trivia_doc, text) == [
+        " ",
+        "; Don't lose this!",
+        "<forced break silent=False>",
+        "<forced break silent=False>",
+        "; Or this!",
+        "<forced break silent=False>",
+    ]

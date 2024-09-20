@@ -336,6 +336,30 @@ def child_to_name(child: runtime.Tree | runtime.TokenValue) -> str:
         return f"token_{child.kind}"
 
 
+def slice_pre_post_trivia(
+    trivia_mode: dict[str, parser.TriviaMode],
+    trivia_tokens: list[runtime.TokenValue],
+) -> tuple[
+    list[tuple[parser.TriviaMode, runtime.TokenValue]],
+    list[tuple[parser.TriviaMode, runtime.TokenValue]],
+]:
+    tokens = [
+        (trivia_mode.get(token.kind, parser.TriviaMode.Blank), token) for token in trivia_tokens
+    ]
+
+    for index, (mode, token) in enumerate(tokens):
+        if token.start == 0:
+            # Everything is pre-trivia if we're at the start of the file.
+            return (tokens, [])
+
+        if mode == parser.TriviaMode.NewLine:
+            # This is the first newline; it belongs with the pre-trivia.
+            return (tokens[index:], tokens[:index])
+
+    # If we never found a new line then it's all post-trivia.
+    return ([], tokens)
+
+
 @dataclasses.dataclass
 class Matcher:
     table: parser.ParseTable
@@ -438,29 +462,10 @@ class Matcher:
                 case parser.Error():
                     raise Exception("How did I get a parse error here??")
 
-    def slice_pre_post_trivia(self, trivia_tokens: list[runtime.TokenValue], src: str) -> tuple[
-        list[tuple[parser.TriviaMode, runtime.TokenValue]],
-        list[tuple[parser.TriviaMode, runtime.TokenValue]],
-    ]:
-        tokens = [
-            (self.trivia_mode.get(token.kind, parser.TriviaMode.Blank), token)
-            for token in trivia_tokens
-        ]
-
-        for index, (mode, token) in enumerate(tokens):
-            if token.start == 0:
-                # Everything is pre-trivia if we're at the start of the file.
-                return (tokens, [])
-
-            if mode == parser.TriviaMode.NewLine:
-                # This is the first newline; it belongs with the post-trivia.
-                return (tokens[index + 1 :], tokens[: index + 1])
-
-        # If we never found a new line then it's all post-trivia.
-        return ([], tokens)
-
     def apply_pre_trivia(self, trivia_tokens: list[runtime.TokenValue], src: str) -> Document:
-        pre_trivia, _ = self.slice_pre_post_trivia(trivia_tokens, src)
+        pre_trivia, _ = slice_pre_post_trivia(self.trivia_mode, trivia_tokens)
+        # print(f"PRE:\n{pre_trivia}")
+
         if len(pre_trivia) == 0:
             return None
 
@@ -469,6 +474,7 @@ class Matcher:
         trivia_doc = None
         new_line_count = 0
         for mode, token in pre_trivia:
+            # print(f"PRE  {mode:25} {token.kind:30} ({new_line_count})")
             match mode:
                 case parser.TriviaMode.LineComment:
                     trivia_doc = cons(
@@ -488,7 +494,6 @@ class Matcher:
                         trivia_doc = cons(
                             trivia_doc,
                             ForceBreak(False),
-                            ForceBreak(False),
                         )
 
                 case _:
@@ -497,12 +502,14 @@ class Matcher:
         return trivia_doc
 
     def apply_post_trivia(self, trivia_tokens: list[runtime.TokenValue], src: str) -> Document:
-        _, post_trivia = self.slice_pre_post_trivia(trivia_tokens, src)
-        if len(post_trivia) == 0:
-            return None
+        if len(trivia_tokens) > 0 and trivia_tokens[-1].end == len(src):
+            return self.apply_eof_trivia(trivia_tokens, src)
+
+        _, post_trivia = slice_pre_post_trivia(self.trivia_mode, trivia_tokens)
 
         trivia_doc = None
         for mode, token in post_trivia:
+            # print(f"POST {mode:25} {token.kind:30}")
             match mode:
                 case parser.TriviaMode.Blank:
                     pass
@@ -525,11 +532,42 @@ class Matcher:
                 case _:
                     typing.assert_never(mode)
 
-        if len(trivia_tokens) > 0 and trivia_tokens[-1].end == len(src):
-            # As a special case, if we're post trivia at the end of the file
-            # then we also need to be pre-trivia too, for the hypthetical EOF
-            # token that we never see.
-            trivia_doc = cons(trivia_doc, self.apply_pre_trivia(trivia_tokens, src))
+        return trivia_doc
+
+    def apply_eof_trivia(self, trivia_tokens: list[runtime.TokenValue], src: str) -> Document:
+        # EOF trivia has weird rules, namely, it's like pre and post joined together but.
+        tokens = [
+            (self.trivia_mode.get(token.kind, parser.TriviaMode.Blank), token)
+            for token in trivia_tokens
+        ]
+
+        at_start = True
+        newline_count = 0
+        trivia_doc = None
+        for mode, token in tokens:
+            match mode:
+                case parser.TriviaMode.Blank:
+                    pass
+
+                case parser.TriviaMode.NewLine:
+                    at_start = False
+                    newline_count += 1
+                    if newline_count <= 2:
+                        trivia_doc = cons(trivia_doc, ForceBreak(False))
+
+                case parser.TriviaMode.LineComment:
+                    # Because this is post-trivia, we know there's something
+                    # to our left, and we can force the space.
+                    trivia_doc = cons(
+                        trivia_doc,
+                        Literal(" ") if at_start else None,
+                        Literal(src[token.start : token.end]),
+                    )
+                    newline_count = 0
+                    at_start = False
+
+                case _:
+                    typing.assert_never(mode)
 
         return trivia_doc
 
