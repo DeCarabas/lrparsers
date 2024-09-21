@@ -109,9 +109,8 @@ class JsonGrammar(Grammar):
 
 
 JSON = JsonGrammar()
-JSON_TABLE = JSON.build_table()
+JSON_PARSER = JSON.build_table()
 JSON_LEXER = JSON.compile_lexer()
-JSON_PARSER = parser_runtime.Parser(JSON_TABLE)
 
 
 def flatten_document(doc: runtime.Document, src: str) -> list:
@@ -145,8 +144,7 @@ def flatten_document(doc: runtime.Document, src: str) -> list:
 
 def test_convert_tree_to_document():
     text = '{"a": true, "b":[1,2,3]}'
-    tokens = parser_runtime.GenericTokenStream(text, JSON_LEXER)
-    tree, errors = JSON_PARSER.parse(tokens)
+    tree, errors = parser_runtime.parse(JSON_PARSER, JSON_LEXER, text)
     assert [] == errors
     assert tree is not None
 
@@ -212,8 +210,7 @@ def _output(txt: str) -> str:
 
 def test_layout_basic():
     text = '{"a": true, "b":[1,2,3], "c":[1,2,3,4,5,6,7]}'
-    tokens = parser_runtime.GenericTokenStream(text, JSON_LEXER)
-    tree, errors = JSON_PARSER.parse(tokens)
+    tree, errors = parser_runtime.parse(JSON_PARSER, JSON_LEXER, text)
     assert [] == errors
     assert tree is not None
 
@@ -271,11 +268,11 @@ class TG(Grammar):
 def test_forced_break():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = parser_runtime.Parser(g.build_table())
+    g_parser = g.build_table()
 
     text = "((ok ok) (ok break break ok) (ok ok ok ok))"
 
-    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = parser_runtime.parse(g_parser, g_lexer, text)
     assert errors == []
     assert tree is not None
 
@@ -301,7 +298,7 @@ def test_forced_break():
 def test_maintaining_line_breaks():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = parser_runtime.Parser(g.build_table())
+    g_parser = g.build_table()
 
     text = """((ok ok)
 ; Don't break here.
@@ -315,7 +312,7 @@ def test_maintaining_line_breaks():
 ; ^ This should only be one break.
 (ok))"""
 
-    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = parser_runtime.parse(g_parser, g_lexer, text)
     assert errors == []
     assert tree is not None
 
@@ -342,14 +339,14 @@ def test_maintaining_line_breaks():
 def test_trailing_trivia():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = parser_runtime.Parser(g.build_table())
+    g_parser = g.build_table()
 
     text = """((ok ok)); Don't lose this!
 
 ; Or this!
     """
 
-    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = parser_runtime.parse(g_parser, g_lexer, text)
     assert errors == []
     assert tree is not None
 
@@ -368,14 +365,14 @@ def test_trailing_trivia():
 def test_trailing_trivia_two():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = parser_runtime.Parser(g.build_table())
+    g_parser = g.build_table()
 
     text = """((ok ok))
 
 ; Or this!
     """
 
-    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = parser_runtime.parse(g_parser, g_lexer, text)
     assert errors == []
     assert tree is not None
 
@@ -394,14 +391,14 @@ def test_trailing_trivia_two():
 def test_trailing_trivia_split():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = parser_runtime.Parser(g.build_table())
+    g_parser = g.build_table()
 
     text = """((ok ok)); Don't lose this!
 
 ; Or this!
     """
 
-    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = parser_runtime.parse(g_parser, g_lexer, text)
     assert errors == []
     assert tree is not None
 

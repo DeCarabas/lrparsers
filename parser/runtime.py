@@ -303,11 +303,6 @@ class TokenStream(typing.Protocol):
         ...
 
 
-# TODO: This runtime API sucks; the TokenStream is nice and all but I should
-#       also be able to have a function that takes a string and produces a
-#       tree directly, with caching intermediates for codegen and whatnot.
-
-
 class Parser:
     table: parser.ParseTable
 
@@ -612,3 +607,12 @@ class GenericTokenStream:
             line = f"{start:{max_offset_len}} {line_part} {column_index:3} {kind.name:{max_terminal_name}} {repr(value)}"
             lines.append(line)
         return lines
+
+
+def parse(
+    parse_table: parser.ParseTable,
+    lexer_table: parser.LexerTable,
+    text: str,
+) -> typing.Tuple[Tree | None, list[str]]:
+    """Parse the provided text with the generated parse table and lex table."""
+    return Parser(parse_table).parse(GenericTokenStream(text, lexer_table))
