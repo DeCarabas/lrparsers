@@ -149,7 +149,7 @@ def test_convert_tree_to_document():
     assert [] == errors
     assert tree is not None
 
-    printer = wadler.Printer(JSON)
+    printer = wadler.Printer(wadler.compile_pretty_table(JSON))
     doc = flatten_document(printer.convert_tree_to_document(tree, text), text)
 
     assert doc == [
@@ -216,7 +216,7 @@ def test_layout_basic():
     assert [] == errors
     assert tree is not None
 
-    printer = wadler.Printer(JSON)
+    printer = wadler.Printer(wadler.compile_pretty_table(JSON))
     result = printer.format_tree(tree, text, 50).apply_to_source(text)
 
     assert result == _output(
@@ -278,7 +278,7 @@ def test_forced_break():
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(g)
+    printer = wadler.Printer(wadler.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -318,7 +318,7 @@ def test_maintaining_line_breaks():
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(g)
+    printer = wadler.Printer(wadler.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -352,7 +352,7 @@ def test_trailing_trivia():
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(g)
+    printer = wadler.Printer(wadler.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -378,7 +378,7 @@ def test_trailing_trivia_two():
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(g)
+    printer = wadler.Printer(wadler.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -432,9 +432,7 @@ def test_trailing_trivia_split():
         print(f"{mode:25} {t.kind:10}  {repr(text[t.start:t.end])}")
 
     trivia_doc = wadler.Matcher(
-        ParseTable([], [], set()),
-        {},
-        {},
+        wadler.MatcherTable(ParseTable([], [], set()), {}, {}),
         TRIVIA_MODES,
     ).apply_post_trivia(
         token.post_trivia,
