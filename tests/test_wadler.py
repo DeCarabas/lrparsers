@@ -18,8 +18,9 @@ from parser.parser import (
     TriviaMode,
 )
 
-import parser.runtime as runtime
-import parser.wadler as wadler
+import parser.runtime as parser_runtime
+import parser.wadler.builder as builder
+import parser.wadler.runtime as runtime
 
 
 class JsonGrammar(Grammar):
@@ -110,33 +111,33 @@ class JsonGrammar(Grammar):
 JSON = JsonGrammar()
 JSON_TABLE = JSON.build_table()
 JSON_LEXER = JSON.compile_lexer()
-JSON_PARSER = runtime.Parser(JSON_TABLE)
+JSON_PARSER = parser_runtime.Parser(JSON_TABLE)
 
 
-def flatten_document(doc: wadler.Document, src: str) -> list:
+def flatten_document(doc: runtime.Document, src: str) -> list:
     match doc:
-        case wadler.NewLine(replace):
+        case runtime.NewLine(replace):
             return [f"<newline {repr(replace)}>"]
-        case wadler.ForceBreak():
+        case runtime.ForceBreak():
             return [f"<forced break silent={doc.silent}>"]
-        case wadler.Indent():
+        case runtime.Indent():
             return [[f"<indent {doc.amount}>", flatten_document(doc.doc, src)]]
-        case wadler.Literal(text):
+        case runtime.Literal(text):
             return [text]
-        case wadler.Group():
+        case runtime.Group():
             return [flatten_document(doc.child, src)]
-        case wadler.Lazy():
+        case runtime.Lazy():
             return flatten_document(doc.resolve(), src)
-        case wadler.Cons():
+        case runtime.Cons():
             result = []
             for d in doc.docs:
                 result += flatten_document(d, src)
             return result
         case None:
             return []
-        case wadler.Marker():
+        case runtime.Marker():
             return [f"<marker {repr(doc.meta)}>", flatten_document(doc.child, src)]
-        case wadler.Trivia():
+        case runtime.Trivia():
             return [f"<trivia>", flatten_document(doc.child, src)]
         case _:
             typing.assert_never(doc)
@@ -144,12 +145,12 @@ def flatten_document(doc: wadler.Document, src: str) -> list:
 
 def test_convert_tree_to_document():
     text = '{"a": true, "b":[1,2,3]}'
-    tokens = runtime.GenericTokenStream(text, JSON_LEXER)
+    tokens = parser_runtime.GenericTokenStream(text, JSON_LEXER)
     tree, errors = JSON_PARSER.parse(tokens)
     assert [] == errors
     assert tree is not None
 
-    printer = wadler.Printer(wadler.compile_pretty_table(JSON))
+    printer = runtime.Printer(builder.compile_pretty_table(JSON))
     doc = flatten_document(printer.convert_tree_to_document(tree, text), text)
 
     assert doc == [
@@ -211,12 +212,12 @@ def _output(txt: str) -> str:
 
 def test_layout_basic():
     text = '{"a": true, "b":[1,2,3], "c":[1,2,3,4,5,6,7]}'
-    tokens = runtime.GenericTokenStream(text, JSON_LEXER)
+    tokens = parser_runtime.GenericTokenStream(text, JSON_LEXER)
     tree, errors = JSON_PARSER.parse(tokens)
     assert [] == errors
     assert tree is not None
 
-    printer = wadler.Printer(wadler.compile_pretty_table(JSON))
+    printer = runtime.Printer(builder.compile_pretty_table(JSON))
     result = printer.format_tree(tree, text, 50).apply_to_source(text)
 
     assert result == _output(
@@ -270,15 +271,15 @@ class TG(Grammar):
 def test_forced_break():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = runtime.Parser(g.build_table())
+    g_parser = parser_runtime.Parser(g.build_table())
 
     text = "((ok ok) (ok break break ok) (ok ok ok ok))"
 
-    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(wadler.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -300,7 +301,7 @@ def test_forced_break():
 def test_maintaining_line_breaks():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = runtime.Parser(g.build_table())
+    g_parser = parser_runtime.Parser(g.build_table())
 
     text = """((ok ok)
 ; Don't break here.
@@ -314,11 +315,11 @@ def test_maintaining_line_breaks():
 ; ^ This should only be one break.
 (ok))"""
 
-    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(wadler.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -341,18 +342,18 @@ def test_maintaining_line_breaks():
 def test_trailing_trivia():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = runtime.Parser(g.build_table())
+    g_parser = parser_runtime.Parser(g.build_table())
 
     text = """((ok ok)); Don't lose this!
 
 ; Or this!
     """
 
-    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(wadler.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -367,18 +368,18 @@ def test_trailing_trivia():
 def test_trailing_trivia_two():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = runtime.Parser(g.build_table())
+    g_parser = parser_runtime.Parser(g.build_table())
 
     text = """((ok ok))
 
 ; Or this!
     """
 
-    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
     assert errors == []
     assert tree is not None
 
-    printer = wadler.Printer(wadler.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(g))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -393,19 +394,21 @@ def test_trailing_trivia_two():
 def test_trailing_trivia_split():
     g = TG()
     g_lexer = g.compile_lexer()
-    g_parser = runtime.Parser(g.build_table())
+    g_parser = parser_runtime.Parser(g.build_table())
 
     text = """((ok ok)); Don't lose this!
 
 ; Or this!
     """
 
-    tree, errors = g_parser.parse(runtime.GenericTokenStream(text, g_lexer))
+    tree, errors = g_parser.parse(parser_runtime.GenericTokenStream(text, g_lexer))
     assert errors == []
     assert tree is not None
 
-    def rightmost(t: runtime.Tree | runtime.TokenValue) -> runtime.TokenValue | None:
-        if isinstance(t, runtime.TokenValue):
+    def rightmost(
+        t: parser_runtime.Tree | parser_runtime.TokenValue,
+    ) -> parser_runtime.TokenValue | None:
+        if isinstance(t, parser_runtime.TokenValue):
             return t
 
         for child in reversed(t.children):
@@ -424,15 +427,15 @@ def test_trailing_trivia_split():
         "COMMENT": TriviaMode.LineComment,
     }
 
-    pre_trivia, post_trivia = wadler.slice_pre_post_trivia(TRIVIA_MODES, token.post_trivia)
+    pre_trivia, post_trivia = runtime.slice_pre_post_trivia(TRIVIA_MODES, token.post_trivia)
     for mode, t in pre_trivia:
         print(f"{mode:25} {t.kind:10}  {repr(text[t.start:t.end])}")
     print("-----")
     for mode, t in post_trivia:
         print(f"{mode:25} {t.kind:10}  {repr(text[t.start:t.end])}")
 
-    trivia_doc = wadler.Matcher(
-        wadler.MatcherTable(ParseTable([], [], set()), {}, {}),
+    trivia_doc = runtime.Matcher(
+        builder.MatcherTable(ParseTable([], [], set()), {}, {}),
         TRIVIA_MODES,
     ).apply_post_trivia(
         token.post_trivia,
@@ -447,3 +450,6 @@ def test_trailing_trivia_split():
         "; Or this!",
         "<forced break silent=False>",
     ]
+
+
+# TODO: Test prefix breaks!
