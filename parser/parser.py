@@ -706,7 +706,12 @@ class TableBuilder(object):
         assert self.goto_row[symbol] is None  # ?
         self.goto_row[symbol] = index
 
-    def _action_precedence(self, symbol: int, action: Action, config: Configuration):
+    def _action_precedence(
+        self,
+        symbol: int,
+        action: Action,
+        config: Configuration,
+    ) -> tuple[Assoc, int]:
         if isinstance(action, Shift):
             return self.precedence[symbol]
         else:
@@ -2761,7 +2766,7 @@ class TriviaMode(enum.Enum):
 # Finally, the base class for grammars
 ###############################################################################
 
-PrecedenceList = list[typing.Tuple[Assoc, list[Rule]]]
+PrecedenceList = list[typing.Tuple[Assoc, list[Rule | str]]]
 
 
 class Grammar:
@@ -2799,7 +2804,7 @@ class Grammar:
 
     def __init__(
         self,
-        start: str | None = None,
+        start: str | NonTerminal | None = None,
         precedence: PrecedenceList | None = None,
         generator: type[GenerateLR0] | None = None,
         trivia: list[str | Terminal] | None = None,
@@ -2812,6 +2817,8 @@ class Grammar:
                 "The default start rule must either be specified in the constructor or as an "
                 "attribute in the class."
             )
+        if isinstance(start, NonTerminal):
+            start = start.name
 
         if precedence is None:
             precedence = getattr(self, "precedence", [])
@@ -2856,8 +2863,10 @@ class Grammar:
                 if resolved is None:
                     raise ValueError(f"The trivia '{t}' is not a terminal name")
                 resolved_trivia.append(resolved)
-            else:
+            elif isinstance(t, Terminal):
                 resolved_trivia.append(t)
+            else:
+                raise ValueError(f"{t} must be either a terminal name or literally a terminal")
 
         # Fix up the precedence table.
         precedence_table = {}
@@ -2871,9 +2880,8 @@ class Grammar:
                 elif isinstance(symbol, NonTerminal):
                     key = symbol.name
                 elif isinstance(symbol, str):
-                    key = terminals.get(symbol)
-                    if key is None:
-                        key = nonterminals.get(symbol)
+                    if symbol in terminals or symbol in nonterminals:
+                        key = symbol
 
                 if key is None:
                     raise ValueError(

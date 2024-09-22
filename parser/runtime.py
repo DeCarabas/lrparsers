@@ -24,17 +24,23 @@ class Tree:
     end: int
     children: typing.Tuple["Tree | TokenValue", ...]
 
-    def format_lines(self, source: str | None = None) -> list[str]:
+    def format_lines(self, source: str | None = None, *, ignore_error: bool = False) -> list[str]:
         lines = []
 
         def format_node(node: Tree | TokenValue, indent: int):
             match node:
                 case Tree(name=name, start=start, end=end, children=children):
+                    if ignore_error and start == end:
+                        return
+
                     lines.append((" " * indent) + f"{name or '???'} [{start}, {end})")
                     for child in children:
                         format_node(child, indent + 2)
 
                 case TokenValue(kind=kind, start=start, end=end):
+                    if ignore_error and start == end:
+                        return
+
                     if source is not None:
                         value = f":'{source[start:end]}'"
                     else:
@@ -44,8 +50,8 @@ class Tree:
         format_node(self, 0)
         return lines
 
-    def format(self, source: str | None = None) -> str:
-        return "\n".join(self.format_lines(source))
+    def format(self, source: str | None = None, *, ignore_error: bool = False) -> str:
+        return "\n".join(self.format_lines(source, ignore_error=ignore_error))
 
 
 @dataclass
