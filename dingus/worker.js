@@ -44,9 +44,27 @@ GRAMMAR_GLOBALS = {}
 
 def eval_grammar(code):
   global GRAMMAR_GLOBALS
+
   try:
     dingus.post_grammar_status("Evaluating grammar...")
     pyodide.code.eval_code(code, globals=GRAMMAR_GLOBALS)
+
+    grammar = None
+    for key, value in GRAMMAR_GLOBALS.items():
+      if isinstance(value, type) and issubclass(value, parser.Grammar) and value is not parser.Grammar:
+        value = value()
+
+      if isinstance(value, parser.Grammar):
+        if grammar is None:
+          grammar = value()
+        else:
+          raise Exception("More than one Grammar found in the file")
+
+    if grammar is None:
+      raise Exception("No grammar definition, define or instantiate a class that inherits from parser.Grammar")
+
+    # TODO: Build the table.
+
     dingus.post_grammar_loaded()
   except Exception as e:
     dingus.post_grammar_error(f"{e}")
