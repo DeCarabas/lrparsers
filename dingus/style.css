@@ -1,0 +1,41 @@
+/* set codemirror ide height to 100% of the textarea */
+body {
+  height: 100vh;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+.page-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-rows: 4rem 1fr;
+  width: 100%;
+  height: 100%;
+}
+
+.grammar-container {
+  grid-column: 1;
+  grid-row: 2;
+  padding: 0.25rem;
+}
+
+.input-container {
+  grid-column: 2;
+  grid-row: 2;
+  padding: 0.25rem;
+}
+
+.results-container {
+  grid-column: 3;
+  grid-row: 2;
+  padding: 0.25rem;
+}
+
+.main-textarea {
+  height: 100%;
+  width: 100%;
+}
+
+.CodeMirror {
+  height: 100%;
+}

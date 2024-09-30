@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Dingus</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"></script>
+
+    <!-- CodeMirror -->
+    <link rel="stylesheet" href="./codemirror/codemirror.css" />
+    <script src="./codemirror/codemirror.js"></script>
+    <script src="./codemirror/python.js"></script>
+
+    <link rel="stylesheet" href="./style.css" />
+    <style>
+    </style>
+  </head>
+  <body>
+    <div class="page-container">
+      <div class="grammar-container">
+        <textarea id="grammar" name="grammar" class="main-textarea"></textarea>
+      </div>
+
+      <div class="input-container">
+        <textarea id="input" name="input" class="main-textarea"></textarea>
+      </div>
+
+      <div class="results-container">
+        <textarea readonly id="output" name="output" class="main-textarea"></textarea>
+      </div>
+    </div>
+
+    <script src="./dingus.js"></script>
+  </body>
+</html>
