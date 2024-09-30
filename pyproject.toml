@@ -8,7 +8,7 @@ classifiers = [
   "Private :: Do Not Upload", # Probably.
   "License :: OSI Approved :: MIT License",
 ]
-version = "0.1.0"
+version = "0.7.9"
 dependencies = []
 requires-python = ">=3.12"
 readme = "README.md"
