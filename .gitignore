@@ -10,4 +10,7 @@ __pycache__/
 # Anything built
 dist/
 
+# Hypothesis
+.hypothesis/
+
 *.whl
