@@ -4,6 +4,21 @@ const PARSER_PACKAGE = "./wheel/lrparsers-0.7.9-py3-none-any.whl"
 // Load the whole pyodide thingy.
 importScripts("pyodide/pyodide.js");
 
+function data_to_js(thing) {
+  if (thing.toJs) {
+    pyproxies = [];
+    thing = thing.toJs({
+      pyproxies,
+      dict_converter: Object.fromEntries,
+      create_pyproxies: false,
+    });
+    for (p of pyproxies) {
+      p.destroy();
+    }
+  }
+  return thing;
+}
+
 const dingus_module = {
   post_grammar_status: function (message) {
     console.log("Grammar Status:", message);
@@ -19,6 +34,25 @@ const dingus_module = {
   post_grammar_error: function(error) {
     console.log("Grammar Error:", error);
     postMessage({kind:"grammar_status", status: "error", message: error});
+  },
+
+  post_doc_parse: function(tree, errors) {
+    tree = data_to_js(tree);
+    errors = data_to_js(errors);
+
+    console.log("Doc parse:", tree, errors);
+    postMessage({
+      kind: "doc_status",
+      status: "ok",
+      message: "Parsed",
+      errors: errors,
+      tree: tree,
+    });
+  },
+
+  post_doc_error: function(error) {
+    console.log("Doc Error:", error);
+    postMessage({kind:"doc_status", status: "error", message: error});
   },
 };
 
@@ -38,9 +72,13 @@ async function setup_python() {
   pyodide.registerJsModule("dingus", dingus_module);
 
   pyodide.runPython(`
+import traceback
+
 import dingus
 import parser
+import parser.runtime as runtime
 import pyodide.code
+import pyodide.ffi as ffi
 
 GRAMMAR_GLOBALS = {}
 GRAMMAR = None
@@ -81,7 +119,37 @@ def eval_grammar(code):
 
     dingus.post_grammar_loaded(grammar.name)
   except Exception as e:
+    traceback.print_exc()
     dingus.post_grammar_error(f"{e}")
+
+def tree_to_js(tree):
+  if tree is None:
+    return None
+  elif isinstance(tree, runtime.Tree):
+    return {
+      "kind": "tree",
+      "name": tree.name,
+      "start": tree.start,
+      "end": tree.end,
+      "children": [tree_to_js(child) for child in tree.children],
+    }
+  else:
+    return {
+      "kind": "token",
+      "start": tree.start,
+      "end": tree.end,
+    }
+
+def eval_document(code):
+  global PARSE_TABLE
+  global LEXER
+
+  try:
+    tree, errors = runtime.parse(PARSE_TABLE, LEXER, code)
+    dingus.post_doc_parse(tree_to_js(tree), errors)
+  except Exception as e:
+    traceback.print_exc()
+    dingus.post_doc_error(f"{e}")
 `);
 
   dingus_module.post_grammar_status("Ready.");
@@ -100,21 +168,27 @@ async function load_grammar_module(code) {
   my_fn.destroy();
 }
 
+async function parse_document(code) {
+  const pyodide = self.pyodide;
+
+  // console.log("Running...");
+  const my_fn = pyodide.globals.get("eval_document");
+  my_fn(code);
+  my_fn.destroy();
+}
+
 self.onmessage = async function(event) {
   await pyodide_promise;
 
   try {
     const { kind, data } = event.data;
     if (kind === "grammar_module") {
-      try {
-        await load_grammar_module(data);
-      } catch (e) {
-        console.log("INTERNAL ERROR:", e.message);
-        postMessage({error: e.message});
-      }
+      await load_grammar_module(data);
+    } else if (kind === "document") {
+      await parse_document(data);
     }
-  } catch (wtf) {
-    console.log("WTF?");
-    console.log(wtf);
+  } catch (e) {
+    console.log("INTERNAL ERROR: ", e.message);
+    postMessage({error: e.message});
   }
 };
