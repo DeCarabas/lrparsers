@@ -22,18 +22,18 @@ function data_to_js(thing) {
 const dingus_module = {
   post_grammar_status: function (message) {
     console.log("Grammar Status:", message);
-    postMessage({kind: "grammar_status", status: "loading", message});
+    postMessage({kind: "grammar", status: "loading", message});
   },
 
   post_grammar_loaded: function (name) {
     const msg = "Grammar '" + name + "' loaded";
     console.log(msg);
-    postMessage({kind: "grammar_status", status: "ok", message: msg});
+    postMessage({kind: "grammar", status: "ok", message: msg});
   },
 
   post_grammar_error: function(error) {
     console.log("Grammar Error:", error);
-    postMessage({kind:"grammar_status", status: "error", message: error});
+    postMessage({kind:"grammar", status: "error", message: error});
   },
 
   post_doc_parse: function(tree, errors) {
@@ -42,7 +42,7 @@ const dingus_module = {
 
     console.log("Doc parse:", tree, errors);
     postMessage({
-      kind: "doc_status",
+      kind: "input",
       status: "ok",
       message: "Parsed",
       errors: errors,
@@ -52,7 +52,7 @@ const dingus_module = {
 
   post_doc_error: function(error) {
     console.log("Doc Error:", error);
-    postMessage({kind:"doc_status", status: "error", message: error});
+    postMessage({kind:"input", status: "error", message: error});
   },
 };
 
@@ -182,9 +182,9 @@ self.onmessage = async function(event) {
 
   try {
     const { kind, data } = event.data;
-    if (kind === "grammar_module") {
+    if (kind === "grammar") {
       await load_grammar_module(data);
-    } else if (kind === "document") {
+    } else if (kind === "input") {
       await parse_document(data);
     }
   } catch (e) {

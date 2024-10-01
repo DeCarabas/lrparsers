@@ -7,60 +7,57 @@ let next_document = null;
 
 const STATUS = document.getElementById("status-line");
 
-function submit_grammar(code) {
-  if (pending_grammar) {
-    console.log("Grammar still pending, parking it");
-    next_grammar = code;
-  } else {
-    pending_grammar = code;
-    worker.postMessage({kind: "grammar_module", data: code});
-    console.log("Grammar posted");
-  }
-}
+const DOC_CHAINS = {};
+function chain_document_submit(kind, editor, on_success) {
+  let pending = null;
+  let next = null;
 
-function submit_document(code) {
-  if (pending_document) {
-    console.log("Document still pending, parking it");
-    next_document = code;
-  } else {
-    pending_document = code;
-    worker.postMessage({kind: "document", data: code});
-    console.log("Document posted");
+  function do_submit(document) {
+    if (pending) {
+      console.log("Old still pending, parking it...");
+      next = document;
+    } else {
+      pending = document;
+      worker.postMessage({kind, data: document});
+      console.log("Document submitted");
+    }
   }
+
+  function on_result(message) {
+    pending = null;
+    if (next) {
+      pending = next;
+      next = null;
+
+      worker.postMessage({kind, data: document});
+      console.log("Posted another document");
+    }
+    if (message.kind === "ok" && on_success) {
+      on_success(message);
+    }
+  }
+  DOC_CHAINS[kind] = on_result;
+
+  let change_timer_id = null;
+  editor.doc.on("change", () => {
+    clearTimeout(change_timer_id);
+    change_timer_id = setTimeout(() => {
+      change_timer_id = null;
+      do_submit(editor.doc.getValue());
+    }, 100);
+  });
 }
 
 const worker = new Worker('worker.js');
 worker.onmessage = (e) => {
   const message = e.data;
-  if (message.kind === "grammar_status") {
-    STATUS.innerText = message.message;
 
-    if ((message.status === "ok") || (message.status === "error")) {
-      pending_grammar = null;
-      if (next_grammar) {
-        pending_grammar = next_grammar;
-        next_grammar = null;
-
-        worker.postMessage({kind: "grammar_module", data: pending_grammar});
-        console.log("Posted another grammar");
-      }
-    }
+  const chain = DOC_CHAINS[message.kind];
+  if (chain) {
+    chain(message);
   }
 
-  if (message.kind === "doc_status") {
-    STATUS.innerText = message.message;
-
-    if ((message.status === "ok") || (message.status === "error")) {
-      pending_document = null;
-      if (next_document) {
-        pending_document = next_document;
-        next_document = null;
-
-        worker.postMessage({kind: "document", data: pending_document});
-        console.log("Posted another document");
-      }
-    }
-  }
+  STATUS.innerText = message.message;
 };
 
 
@@ -73,15 +70,7 @@ function setup_editors() {
       value: "from parser import Grammar\n\nclass MyGrammar(Grammar):\n    pass\n",
     },
   );
-
-  let grammar_change_timer_id = null;
-  grammar_editor.doc.on("change", () => {
-    clearTimeout(grammar_change_timer_id);
-    grammar_change_timer_id = setTimeout(() => {
-      grammar_change_timer_id = null;
-      submit_grammar(grammar_editor.doc.getValue());
-    }, 100);
-  });
+  chain_document_submit("grammar", grammar_editor);
 
   const input_editor = CodeMirror.fromTextArea(
     document.getElementById("input"),
@@ -89,15 +78,7 @@ function setup_editors() {
       lineNumbers: true,
     },
   );
-
-  let input_change_timer_id = null;
-  input_editor.doc.on("change", () => {
-    clearTimeout(input_change_timer_id);
-    input_change_timer_id = setTimeout(() => {
-      input_change_timer_id = null;
-      submit_document(input_editor.doc.getValue());
-    }, 100);
-  });
+  chain_document_submit("input", input_editor);
 }
 
 setup_editors();
