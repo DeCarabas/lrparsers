@@ -8,7 +8,7 @@ body {
 .page-container {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  grid-template-rows: 4rem 1fr;
+  grid-template-rows: 4rem 1fr 2em;
   width: 100%;
   height: 100%;
 }
@@ -17,11 +17,31 @@ body {
   grid-column: 1;
   grid-row: 2;
   padding: 0.25rem;
+
+  /* Establishing minimum sizes here causes the codemirror CSS to work */
+  min-height: 0;
+  min-width: 0;
+}
+
+.status {
+  grid-column: 1 / 3;
+  grid-row: 3;
+  padding: 0.25rem;
 }
 
 .input-container {
   grid-column: 2;
   grid-row: 2;
+  padding: 0.25rem;
+
+  /* Establishing minimum sizes here causes the codemirror CSS to work */
+  min-height: 0;
+  min-width: 0;
+}
+
+.input-status {
+  grid-column: 2;
+  grid-row: 3;
   padding: 0.25rem;
 }
 

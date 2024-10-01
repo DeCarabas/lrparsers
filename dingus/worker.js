@@ -10,9 +10,10 @@ const dingus_module = {
     postMessage({kind: "grammar_status", status: "loading", message});
   },
 
-  post_grammar_loaded: function () {
-    console.log("Grammar Loaded");
-    postMessage({kind: "grammar_status", status: "ok", message: "Grammar loaded"});
+  post_grammar_loaded: function (name) {
+    const msg = "Grammar '" + name + "' loaded";
+    console.log(msg);
+    postMessage({kind: "grammar_status", status: "ok", message: msg});
   },
 
   post_grammar_error: function(error) {
@@ -22,17 +23,18 @@ const dingus_module = {
 };
 
 async function setup_python() {
-  console.log("Loading pyodide....");
+  dingus_module.post_grammar_status("Loading python....");
   const pyodide = await loadPyodide({
     packages: ["micropip"],
   });
   pyodide.setStdout({ batched: (msg) => console.log(msg) }); // TODO: I know this is an option above.
 
   // TODO: Do I actually want micropip? Probably not?
-  console.log("Installing parser package...");
+  dingus_module.post_grammar_status("Installing parser package...");
   const micropip = pyodide.pyimport("micropip");
   await micropip.install(PARSER_PACKAGE);
 
+  dingus_module.post_grammar_status("Configuring dingus...");
   pyodide.registerJsModule("dingus", dingus_module);
 
   pyodide.runPython(`
@@ -56,7 +58,7 @@ def eval_grammar(code):
 
       if isinstance(value, parser.Grammar):
         if grammar is None:
-          grammar = value()
+          grammar = value
         else:
           raise Exception("More than one Grammar found in the file")
 
@@ -65,12 +67,12 @@ def eval_grammar(code):
 
     # TODO: Build the table.
 
-    dingus.post_grammar_loaded()
+    dingus.post_grammar_loaded(grammar.name)
   except Exception as e:
     dingus.post_grammar_error(f"{e}")
 `);
 
-  console.log("Loaded!");
+  dingus_module.post_grammar_status("Ready.");
   self.pyodide = pyodide;
   return pyodide;
 }
@@ -80,8 +82,7 @@ const pyodide_promise = setup_python();
 async function load_grammar_module(code) {
   const pyodide = self.pyodide;
 
-  console.log("Running...");
-
+  // console.log("Running...");
   const my_fn = pyodide.globals.get("eval_grammar");
   my_fn(code);
   my_fn.destroy();

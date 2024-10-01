@@ -1,6 +1,8 @@
 let pending_grammar = null;
 let next_grammar = null;
 
+const STATUS = document.getElementById("status-line");
+
 function submit_grammar(code) {
   if (pending_grammar) {
     console.log("Grammar still pending, parking it");
@@ -16,6 +18,8 @@ const worker = new Worker('worker.js');
 worker.onmessage = (e) => {
   const message = e.data;
   if (message.kind === "grammar_status") {
+    STATUS.innerText = message.message;
+
     if ((message.status === "ok") || (message.status === "error")) {
       pending_grammar = null;
       if (next_grammar) {
