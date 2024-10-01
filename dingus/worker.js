@@ -43,9 +43,15 @@ import parser
 import pyodide.code
 
 GRAMMAR_GLOBALS = {}
+GRAMMAR = None
+PARSE_TABLE = None
+LEXER = None
 
 def eval_grammar(code):
   global GRAMMAR_GLOBALS
+  global GRAMMAR
+  global PARSE_TABLE
+  global LEXER
 
   try:
     dingus.post_grammar_status("Evaluating grammar...")
@@ -65,7 +71,13 @@ def eval_grammar(code):
     if grammar is None:
       raise Exception("No grammar definition, define or instantiate a class that inherits from parser.Grammar")
 
-    # TODO: Build the table.
+    GRAMMAR = grammar
+
+    dingus.post_grammar_status("Building parse table...")
+    PARSE_TABLE = grammar.build_table()
+
+    dingus.post_grammar_status("Building lexer...")
+    LEXER = grammar.compile_lexer()
 
     dingus.post_grammar_loaded(grammar.name)
   except Exception as e:
