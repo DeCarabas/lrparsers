@@ -13,6 +13,10 @@ function chain_document_submit(kind, editor, on_success) {
   let next = null;
 
   function do_submit(document) {
+    if (window.localStorage) {
+      window.localStorage.setItem(kind, document);
+    }
+
     if (pending) {
       console.log("Old still pending, parking it...");
       next = document;
@@ -46,6 +50,13 @@ function chain_document_submit(kind, editor, on_success) {
       do_submit(editor.doc.getValue());
     }, 100);
   });
+
+  if (window.localStorage) {
+    const value = window.localStorage.getItem(kind);
+    if (value) {
+      editor.doc.setValue(value);
+    }
+  }
 }
 
 const worker = new Worker('worker.js');
@@ -60,6 +71,9 @@ worker.onmessage = (e) => {
   STATUS.innerText = message.message;
 };
 
+function render_parse_results(message) {
+  // What
+}
 
 function setup_editors() {
   const grammar_editor = CodeMirror.fromTextArea(
@@ -78,7 +92,7 @@ function setup_editors() {
       lineNumbers: true,
     },
   );
-  chain_document_submit("input", input_editor);
+  chain_document_submit("input", input_editor, render_parse_results);
 }
 
 setup_editors();
