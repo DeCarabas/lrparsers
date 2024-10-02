@@ -1,10 +1,3 @@
-// TODO: Abstract/Factor
-let pending_grammar = null;
-let next_grammar = null;
-
-let pending_document = null;
-let next_document = null;
-
 const STATUS = document.getElementById("status-line");
 
 const DOC_CHAINS = {};
