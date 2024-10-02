@@ -12,7 +12,8 @@ function chain_document_submit(kind, editor, on_success) {
   let pending = null;
   let next = null;
 
-  function do_submit(document) {
+  function do_submit() {
+    const document = editor.doc.getValue();
     if (window.localStorage) {
       window.localStorage.setItem(kind, document);
     }
@@ -36,7 +37,8 @@ function chain_document_submit(kind, editor, on_success) {
       worker.postMessage({kind, data: document});
       console.log("Posted another document");
     }
-    if (message.kind === "ok" && on_success) {
+
+    if (message.status === "ok" && on_success) {
       on_success(message);
     }
   }
@@ -47,7 +49,7 @@ function chain_document_submit(kind, editor, on_success) {
     clearTimeout(change_timer_id);
     change_timer_id = setTimeout(() => {
       change_timer_id = null;
-      do_submit(editor.doc.getValue());
+      do_submit();
     }, 100);
   });
 
@@ -57,6 +59,8 @@ function chain_document_submit(kind, editor, on_success) {
       editor.doc.setValue(value);
     }
   }
+
+  return do_submit;
 }
 
 const worker = new Worker('worker.js');
@@ -71,28 +75,66 @@ worker.onmessage = (e) => {
   STATUS.innerText = message.message;
 };
 
+let grammar_editor = null;
+let input_editor = null;
+
 function render_parse_results(message) {
-  // What
+  console.log("WHAT?");
+
+  function render_tree_node(parent, node) {
+    const tree_div = document.createElement("div");
+    tree_div.classList.add("parsed-node");
+
+    const node_label = document.createElement("a");
+    node_label.innerText = node.name;
+    node_label.setAttribute("href", "#");
+    node_label.onclick = () => {
+      const doc = input_editor.doc;
+      doc.setSelection(
+        doc.posFromIndex(node.start),
+        doc.posFromIndex(node.end),
+        {scroll: true},
+      );
+    };
+    tree_div.appendChild(node_label);
+
+    if (node.kind === "tree") {
+      tree_div.classList.add("parsed-tree");
+      for (const child of node.children) {
+        render_tree_node(tree_div, child);
+      }
+    } else {
+      tree_div.classList.add("parsed-token");
+    }
+    parent.appendChild(tree_div);
+  }
+
+  const root = document.getElementById("output-root");
+  root.innerHTML = "";
+  render_tree_node(root, message.tree);
 }
 
 function setup_editors() {
-  const grammar_editor = CodeMirror.fromTextArea(
+  grammar_editor = CodeMirror.fromTextArea(
     document.getElementById("grammar"),
     {
       lineNumbers: true,
       mode: "python",
-      value: "from parser import Grammar\n\nclass MyGrammar(Grammar):\n    pass\n",
     },
   );
-  chain_document_submit("grammar", grammar_editor);
 
-  const input_editor = CodeMirror.fromTextArea(
+  input_editor = CodeMirror.fromTextArea(
     document.getElementById("input"),
     {
       lineNumbers: true,
     },
   );
-  chain_document_submit("input", input_editor, render_parse_results);
+
+  const submit_input = chain_document_submit(
+    "input", input_editor, render_parse_results);
+
+  chain_document_submit(
+    "grammar", grammar_editor, submit_input);
 }
 
 setup_editors();

@@ -49,6 +49,12 @@ body {
   grid-column: 3;
   grid-row: 2;
   padding: 0.25rem;
+
+  overflow-y: scroll;
+}
+
+.parsed-node {
+  margin-left: 1rem;
 }
 
 .main-textarea {

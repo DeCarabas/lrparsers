@@ -118,6 +118,7 @@ def eval_grammar(code):
     LEXER = grammar.compile_lexer()
 
     dingus.post_grammar_loaded(grammar.name)
+
   except Exception as e:
     traceback.print_exc()
     dingus.post_grammar_error(f"{e}")
@@ -125,6 +126,7 @@ def eval_grammar(code):
 def tree_to_js(tree):
   if tree is None:
     return None
+
   elif isinstance(tree, runtime.Tree):
     return {
       "kind": "tree",
@@ -133,9 +135,11 @@ def tree_to_js(tree):
       "end": tree.end,
       "children": [tree_to_js(child) for child in tree.children],
     }
+
   else:
     return {
       "kind": "token",
+      "name": tree.kind,
       "start": tree.start,
       "end": tree.end,
     }
