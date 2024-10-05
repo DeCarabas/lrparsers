@@ -1,4 +1,5 @@
 # This is an example grammar.
+import parser
 from parser import (
     Assoc,
     Grammar,
@@ -22,6 +23,8 @@ from parser import (
 
 class FineGrammar(Grammar):
     # generator = parser.GenerateLR1
+    # generator = parser.GeneratePager
+    # generator = parser.GenerateLALR
     start = "File"
 
     trivia = ["BLANKS", "LINE_BREAK", "COMMENT"]
@@ -524,7 +527,9 @@ if __name__ == "__main__":
 
     # TODO: Actually generate a lexer/parser for some runtime.
     grammar = FineGrammar()
-    grammar.build_table()
+
+    table = grammar.build_table()
+    # print(table.format())
 
     lexer = grammar.compile_lexer()
     dump_lexer_table(lexer)

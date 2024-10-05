@@ -137,6 +137,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import itertools
 import json
 import typing
 
@@ -147,6 +148,17 @@ import typing
 # We start with LR0 parsers, because they form the basis of everything else.
 ###############################################################################
 class ConfigurationCore(typing.NamedTuple):
+    """A core configuration, basically, a position within a rule.
+
+    These need to be as small and as tight as you can make them. They are
+    immutable and we deal with large numbers of these. Note that in most
+    places we actually deal with full `Configuration` objects- those are like
+    these but they also have Lookahead in them.
+    """
+
+    # TODO: Possible improvement: make `symbols` an index into a production
+    #       list. This would not make this smaller but it might make comparisons
+    #       faster.
     name: int
     symbols: typing.Tuple[int, ...]
     position: int
@@ -214,14 +226,6 @@ class Configuration(typing.NamedTuple):
     """A rule being tracked in a state. That is, a specific position within a
     specific rule, with an associated lookahead state.
 
-    We make a *lot* of these and we need/want to pre-cache a ton of things we
-    ask about so we need to override __init__, otherwise it's immutable and
-    fixed and doesn't have a dict to save space.
-
-    It also supports hashing and equality and comparison, so it can be sorted
-    and whatnot. This really is the workhorse data structure of the whole thing.
-    If you can improve this you can improve the performance of everything probably.
-
     (Note: technically, lookahead isn't used until we get to LR(1) parsers,
     but if left at its default it's harmless. Ignore it until you get to
     the part about LR(1).)
@@ -258,9 +262,9 @@ class Configuration(typing.NamedTuple):
 
     def format(self, alphabet: list[str]) -> str:
         if self.lookahead != ():
-            la = " {" + ",".join(alphabet[i] for i in self.lookahead) + "}"
+            la = " ctx:{" + ",".join(alphabet[i] for i in self.lookahead) + "}"
         else:
-            la = ""
+            la = " ctx:{}"
 
         return f"{self.core.format(alphabet)}{la}"
 
@@ -341,6 +345,7 @@ class ConfigurationSetInfo:
             {
                 str(set_index): {
                     "configs": [c.format(alphabet) for c in config_set],
+                    "closures": [c.format(alphabet) for c in self.closures[set_index] or []],
                     "successors": {
                         alphabet[k]: str(v) for k, v in self.successors[set_index].items()
                     },
@@ -937,7 +942,6 @@ class GenerateLR0:
         self.start_symbol = start_symbol
         self.end_symbol = end_symbol
 
-    @functools.cache
     def gen_closure_next(self, config: Configuration):
         """Return the next set of configurations in the closure for config.
 
@@ -962,7 +966,7 @@ class GenerateLR0:
 
         (We have replaced a recursive version with an iterative one.)
         """
-        closure = set()
+        closure: set[Configuration] = set()
         pending = list(seeds)
         pending_next = []
         while len(pending) > 0:
@@ -978,7 +982,18 @@ class GenerateLR0:
             pending_next = temp
             pending_next.clear()
 
-        return ConfigSet(closure)
+        # NOTE: The generation of this closure *might* have generated
+        #       multiple cores with different lookaheads; if that's
+        #       the case we need to merge.
+        merged: dict[ConfigurationCore, set[int]] = {}
+        for c in closure:
+            existing = merged.get(c.core)
+            if existing is not None:
+                existing.update(c.lookahead)
+            else:
+                merged[c.core] = set(c.lookahead)
+
+        return ConfigSet(Configuration(k, tuple(sorted(v))) for k, v in merged.items())
 
     def gen_all_successors(
         self, config_set: typing.Iterable[Configuration]
@@ -1076,6 +1091,7 @@ class GenerateLR0:
         Anything missing from the row indicates an error.
         """
         config_sets = self.gen_all_sets()
+        # print(config_sets.dump_state(self.alphabet))
         builder = TableBuilder(self.alphabet, self.precedence, self.transparents)
 
         for config_set_id, config_set in enumerate(config_sets.closures):
@@ -1425,7 +1441,6 @@ class GenerateLR1(GenerateSLR1):
         """
         return config.lookahead
 
-    @functools.cache
     def gen_closure_next(self, config: Configuration):
         """Return the next set of configurations in the closure for config.
 
@@ -1444,12 +1459,13 @@ class GenerateLR1(GenerateSLR1):
         if config_next is None:
             return ()
         else:
+            lookahead, epsilon = self.gen_first(config.rest)
+            if epsilon:
+                lookahead.update(config.lookahead)
+            lookahead_tuple = tuple(sorted(lookahead))
+
             next = []
             for rule in self.grammar[config_next]:
-                lookahead, epsilon = self.gen_first(config.rest)
-                if epsilon:
-                    lookahead.update(config.lookahead)
-                lookahead_tuple = tuple(sorted(lookahead))
                 next.append(Configuration.from_rule(config_next, rule, lookahead=lookahead_tuple))
 
             return tuple(next)
@@ -1570,6 +1586,337 @@ class GenerateLALR(GenerateLR1):
             result.add_successor(from_index, symbol, to_index)
 
         return result
+
+
+# Here we have a slightly different definition of a ConfigurationSet; we keep the
+# lookaheads outside and use a dictionary to check for containment quickly.
+# ItemSet is used in the GRM/Pager/Chin algorithm.
+@dataclasses.dataclass
+class ItemSet:
+    items: dict[ConfigurationCore, set[int]]
+
+    def __init__(self, items=None):
+        self.items = items or {}
+
+    @classmethod
+    def from_config_set(cls, config_set: ConfigSet) -> "ItemSet":
+        return ItemSet({config.core: set(config.lookahead) for config in config_set})
+
+    def weakly_compatible(self, other: "ItemSet") -> bool:
+        a = self.items
+        b = other.items
+
+        if len(a) != len(b):
+            return False
+
+        for acore in a:
+            if acore not in b:
+                return False
+
+        if len(a) == 1:
+            return True
+
+        # DOTY: This loop I do not understand, truly. What the heck is happening here?
+        a_keys = list(a.keys())
+        for i, i_key in enumerate(itertools.islice(a_keys, 0, len(a_keys) - 1)):
+            for j_key in itertools.islice(a_keys, i + 1, None):
+                a_i_key = a[i_key]
+                b_i_key = b[i_key]
+                a_j_key = a[j_key]
+                b_j_key = b[j_key]
+
+                # DOTY: GRMTools written with intersects(); we don't have that we have
+                #       `not disjoint()`. :P There are many double negatives....
+                #
+                #  not (intersect(a_i, b_j) or intersect(a_j, b_i))
+                #  not ((not disjoint(a_i, b_j)) or (not disjoint(a_j, b_i)))
+                #  ((not not disjoint(a_i, b_j)) and (not not disjoint(a_j, b_i)))
+                #  disjoint(a_i, b_j) and disjoint(a_j, b_i)
+                if a_i_key.isdisjoint(b_j_key) and a_j_key.isdisjoint(b_i_key):
+                    continue
+
+                # intersect(a_i, a_j) or intersect(b_i, b_j)
+                # (not disjoint(a_i, a_j)) or (not disjoint(b_i, b_j))
+                # not (disjoint(a_i, a_j) and disjoint(b_i, b_j))
+                if not (a_i_key.isdisjoint(a_j_key) and b_i_key.isdisjoint(b_j_key)):
+                    continue
+
+                return False
+
+        return True
+
+    def weakly_merge(self, other: "ItemSet") -> bool:
+        """Merge b into a, returning True if this lead to any changes."""
+        a = self.items
+        b = other.items
+
+        changed = False
+        for a_key, a_ctx in a.items():
+            start_len = len(a_ctx)
+            a_ctx.update(b[a_key])  # Python doesn't tell us changes
+            changed = changed or (start_len != len(a_ctx))
+
+        return changed
+
+    def goto(self, symbol: int) -> "ItemSet":
+        result = ItemSet()
+        for core, context in self.items.items():
+            if core.next == symbol:
+                next = core.replace_position(core.position + 1)
+                result.items[next] = set(context)
+        return result
+
+    def to_config_set(self) -> ConfigSet:
+        return ConfigSet(
+            {Configuration(core, tuple(sorted(ctx))) for core, ctx in self.items.items()}
+        )
+
+
+class GeneratePager(GenerateLR1):
+    """Pager's algorithm as interpreted through GRMTools"""
+
+    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
+        # This function can be seen as a modified version of items() from
+        # Chen's dissertation.
+        #
+        # (It is also (practically) a converted version from grmtools into
+        # python, more or less verbatim at this point. I have no idea what's
+        # going on.)
+        # firsts = self._firsts
+
+        # closed_states and core_states are both equally sized vectors of
+        # states. Core states are smaller, and used for the weakly compatible
+        # checks, but we ultimately need to return closed states. Closed
+        # states which are None are those which require processing; thus
+        # closed_states also implicitly serves as a todo list.
+        closed_states: list[ItemSet | None] = []
+        core_states: list[ItemSet] = []
+        edges: list[dict[int, int]] = []
+
+        # Because we GC states later, it's possible that we will end up with
+        # more states before GC than `StorageT` can hold. We thus do all our
+        # calculations in this function in terms of `usize`s before
+        # converting them to `StorageT` later.
+        #
+        # DOTY: This comment is useless for us: we don't optimize the storage
+        #       of the state graph so StorageT is useless.
+        #
+        # DOTY: This next bit here is basically figuring out the seeds, which
+        #       we have already done. We just need to convert them into an
+        #       itemset.
+        #
+        state0 = ItemSet({seed.core: set(seed.lookahead) for seed in seeds})
+        core_states.append(state0)
+        closed_states.append(None)
+        edges.append({})
+
+        # We maintain two lists of which rules and tokens we've seen; when
+        # processing a given state there's no point processing a rule or token
+        # more than once.
+        #
+        # DOTY: Our alphabet is in a single range so we just have a single set.
+        seen: set[int] = set()
+
+        # new_states is used to separate out iterating over states vs.
+        # mutating it
+        #
+        # DOTY: TODO: Do we need this?
+        new_states: list[tuple[int, ItemSet]] = []
+
+        # cnd_[rule|token]_weaklies represent which states are possible weakly
+        # compatible matches for a given symbol.
+        #
+        # DOTY: As with `seen`, we have a uniform space so we can have a
+        #       uniform one of these too.
+        cnd_weaklies: list[list[int]] = [[] for _ in range(len(self.alphabet))]
+
+        todo = 1  # How many None values are there in closed_states?
+        todo_off = 0  # Offset in closed states to start searching for the next todo.
+        while todo > 0:
+            assert len(core_states) == len(closed_states)
+            assert len(core_states) == len(edges)
+
+            # state_i is the next item to process. We don't want to
+            # continually search for the next None from the beginning, so we
+            # remember where we last saw a None (todo_off) and search from
+            # that point onwards, wrapping as necessary. Since processing a
+            # state x disproportionately causes state x + 1 to require
+            # processing, this prevents the search from becoming horribly
+            # non-linear.
+            try:
+                state_i = closed_states.index(None, todo_off)
+            except ValueError:
+                state_i = closed_states.index(None)  # DOTY: Will not raise, given todo > 0
+
+            todo_off = state_i + 1
+            todo -= 1
+
+            # DOTY: TODO: We convert here back and forth to Configuration
+            #       objects, but maybe we can make ItemSet our core
+            #       representation throughout this file. (Even in LR0.) So
+            #       never use Configuration, always ItemSet and ConfigCore.
+            #
+            #       Or just rebuild gen_closure inside ItemSet. shrug
+            temp_set = core_states[state_i].to_config_set()
+            closure = self.gen_closure(temp_set)
+            cl_state = ItemSet.from_config_set(closure)
+            closed_states[state_i] = cl_state
+
+            seen.clear()
+            new_states.clear()
+            for core in cl_state.items.keys():
+                sym = core.next
+                if sym is None or sym in seen:
+                    continue
+                seen.add(sym)
+
+                nstate = cl_state.goto(sym)
+                new_states.append((sym, nstate))
+
+            for sym, nstate in new_states:
+                # Try and find a compatible match for this state.
+                cnd_states = cnd_weaklies[sym]
+
+                # First of all see if any of the candidate states are exactly
+                # the same as the new state, in which case we only need to
+                # add an edge to the candidate state. This isn't just an
+                # optimisation (though it does avoid the expense of change
+                # propagation), but has a correctness aspect: there's no
+                # guarantee that the weakly compatible check is reflexive
+                # (i.e. a state may not be weakly compatible with itself).
+                found = False
+                for cnd in cnd_states:
+                    if core_states[cnd] == nstate:
+                        edges[state_i][sym] = cnd
+                        found = True
+                        break
+
+                if found:
+                    continue
+
+                # No candidate states were equal to the new state, so we need
+                # to look for a candidate state which is weakly compatible.
+                m: int | None = None
+                for cnd in cnd_states:
+                    if core_states[cnd].weakly_compatible(nstate):
+                        m = cnd
+                        break
+
+                if m is not None:
+                    # A weakly compatible match has been found.
+                    edges[state_i][sym] = m
+                    assert core_states[m].weakly_compatible(nstate)  # TODO: REMOVE, TOO SLOW
+                    if core_states[m].weakly_merge(nstate):
+                        # We only do the simplest change propagation, forcing possibly
+                        # affected sets to be entirely reprocessed (which will recursively
+                        # force propagation too). Even though this does unnecessary
+                        # computation, it is still pretty fast.
+                        #
+                        # Note also that edges[k] will be completely regenerated, overwriting
+                        # all existing entries and possibly adding new ones. We thus don't
+                        # need to clear it manually.
+                        if closed_states[m] is not None:
+                            closed_states[m] = None
+                            todo += 1
+
+                else:
+                    stidx = len(core_states)
+
+                    cnd_weaklies[sym].append(stidx)
+                    edges[state_i][sym] = stidx
+
+                    edges.append({})
+                    closed_states.append(None)
+                    core_states.append(nstate)
+                    todo += 1
+
+        # Although the Pager paper doesn't talk about it, the algorithm above
+        # can create unreachable states due to the non-determinism inherent
+        # in working with hashsets. Indeed, this can even happen with the
+        # example from Pager's paper (on perhaps 1 out of 100 runs, 24 or 25
+        # states will be created instead of 23). We thus need to weed out
+        # unreachable states and update edges accordingly.
+        assert len(core_states) == len(closed_states)
+
+        all_states = []
+        for core_state, closed_state in zip(core_states, closed_states):
+            assert closed_state is not None
+            all_states.append((core_state, closed_state))
+        gc_states, gc_edges = self.gc(all_states, edges)
+
+        # DOTY: UGH this is so bad, we should rewrite to use ItemSet everywehre
+        #       probably, which actually means getting rid of the pluggable
+        #       generator because who actually needs that?
+
+        # Register all the actually merged, final config sets. I should *not*
+        # have to do all this work. Really really garbage.
+        result = ConfigurationSetInfo()
+        result.sets = [core_state.to_config_set() for core_state, _ in gc_states]
+        result.core_key = {s: i for i, s in enumerate(result.sets)}
+        result.closures = [closed_state.to_config_set() for _, closed_state in gc_states]
+        result.config_set_key = {s: i for i, s in enumerate(result.closures) if s is not None}
+        result.successors = gc_edges
+
+        return result
+
+    def gc(
+        self,
+        states: list[tuple[ItemSet, ItemSet]],
+        edges: list[dict[int, int]],
+    ) -> tuple[list[tuple[ItemSet, ItemSet]], list[dict[int, int]]]:
+        # First of all, do a simple pass over all states. All state indexes
+        # reachable from the start state will be inserted into the 'seen'
+        # set.
+        todo = [0]
+        seen = set()
+        while len(todo) > 0:
+            item = todo.pop()
+            if item in seen:
+                continue
+            seen.add(item)
+            todo.extend(e for e in edges[item].values() if e not in seen)
+
+        if len(seen) == len(states):
+            # Every state is reachable.
+            return states, edges
+
+        # Imagine we started with 3 states and their edges:
+        #   states: [0, 1, 2]
+        #   edges : [[_ => 2]]
+        #
+        # At this point, 'seen' will be the set {0, 2}. What we need to do is
+        # to create a new list of states that doesn't have state 1 in it.
+        # That will cause state 2 to become to state 1, meaning that we need
+        # to adjust edges so that the pointer to state 2 is updated to state
+        # 1. In other words we want to achieve this output:
+        #
+        #   states: [0, 2]
+        #   edges : [_ => 1]
+        #
+        # The way we do this is to first iterate over all states, working out
+        # what the mapping from seen states to their new offsets is.
+        gc_states: list[tuple[ItemSet, ItemSet]] = []
+        offsets: list[int] = []
+        offset = 0
+        for state_i, zstate in enumerate(states):
+            offsets.append(state_i - offset)
+            if state_i not in seen:
+                offset += 1
+                continue
+
+            gc_states.append(zstate)
+
+        # At this point the offsets list will be [0, 1, 1]. We now create new
+        # edges where each offset is corrected by looking it up in the
+        # offsets list.
+        gc_edges: list[dict[int, int]] = []
+        for st_edge_i, st_edges in enumerate(edges):
+            if st_edge_i not in seen:
+                continue
+
+            gc_edges.append({k: offsets[v] for k, v in st_edges.items()})
+
+        return (gc_states, gc_edges)
 
 
 FlattenedWithMetadata = list["str|Terminal|tuple[dict[str,typing.Any],FlattenedWithMetadata]"]
@@ -2773,7 +3120,7 @@ class Grammar:
     """The base class for defining a grammar.
 
     Inherit from this, and and define members for your nonterminals, and then
-    use the `build_tables` method to construct the parse tables.
+    use the `build_table` method to construct the parse tables.
 
 
     Here's an example of a simple grammar:
@@ -2825,7 +3172,7 @@ class Grammar:
         assert precedence is not None
 
         if generator is None:
-            generator = getattr(self, "generator", GenerateLALR)
+            generator = getattr(self, "generator", GeneratePager)
         assert generator is not None
 
         if trivia is None:

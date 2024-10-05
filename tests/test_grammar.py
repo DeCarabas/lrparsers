@@ -8,7 +8,7 @@ from parser import Grammar, seq, rule, Terminal
 
 class Tokens:
     def __init__(self, *toks: Terminal):
-        self._tokens = [(t, 0, 0) for t in toks]
+        self._tokens = [(t, i, 1) for i, t in enumerate(toks)]
         self._lines = []
 
     def tokens(self):
@@ -18,19 +18,23 @@ class Tokens:
         return self._lines
 
 
-def _tree(treeform) -> runtime.Tree | runtime.TokenValue:
+def _tree(treeform, count=0) -> runtime.Tree | runtime.TokenValue:
     if isinstance(treeform, str):
-        return runtime.TokenValue(treeform, 0, 0, [], [])
+        return runtime.TokenValue(treeform, count, count + 1, [], [])
     else:
         assert isinstance(treeform, tuple)
         name = treeform[0]
         assert isinstance(name, str)
-        return runtime.Tree(
-            name=name,
-            start=0,
-            end=0,
-            children=tuple(_tree(x) for x in treeform[1:]),
-        )
+
+        start = end = count
+
+        children = []
+        for x in treeform[1:]:
+            child = _tree(x, end)
+            end = child.end
+            children.append(child)
+
+        return runtime.Tree(name=name, start=start, end=end, children=tuple(children))
 
 
 def test_lr0_lr0():
@@ -60,6 +64,45 @@ def test_lr0_lr0():
 
     assert errors == []
     assert tree == _tree(("E", ("E", ("T", "id")), "+", ("T", "(", ("E", ("T", "id")), ")")))
+
+
+def test_all_generators():
+    """An LR0 grammar should work with an LR0 generator."""
+
+    class G(Grammar):
+        start = "E"
+
+        @rule
+        def E(self):
+            return seq(self.E, self.PLUS, self.T) | self.T
+
+        @rule
+        def T(self):
+            return seq(self.LPAREN, self.E, self.RPAREN) | self.IDENTIFIER
+
+        PLUS = Terminal("+", name="+")
+        LPAREN = Terminal("(", name="(")
+        RPAREN = Terminal(")", name=")")
+        IDENTIFIER = Terminal("id", name="id")
+
+    GENERATORS = [
+        parser.GenerateLR0,
+        parser.GeneratePager,
+        parser.GenerateLR1,
+        parser.GenerateLALR,
+    ]
+    for generator in GENERATORS:
+        table = G().build_table(generator=generator)
+        tree, errors = runtime.Parser(table).parse(
+            Tokens(G.IDENTIFIER, G.PLUS, G.LPAREN, G.IDENTIFIER, G.RPAREN)
+        )
+
+        print("\n")
+        print(generator)
+        print(f"{table.format()}")
+
+        assert errors == []
+        assert tree == _tree(("E", ("E", ("T", "id")), "+", ("T", "(", ("E", ("T", "id")), ")")))
 
 
 def test_lr0_shift_reduce():
@@ -170,6 +213,7 @@ def test_grammar_aho_ullman_1():
         G().build_table()
 
     G().build_table(generator=parser.GenerateLR1)
+    G().build_table(generator=parser.GeneratePager)
 
 
 def test_grammar_aho_ullman_2():
@@ -191,13 +235,14 @@ def test_grammar_aho_ullman_2():
     TestGrammar().build_table()
     TestGrammar().build_table(generator=parser.GenerateLR1)
     TestGrammar().build_table(generator=parser.GenerateLALR)
+    TestGrammar().build_table(generator=parser.GeneratePager)
 
 
 def test_fun_lalr():
 
     class TestGrammar(Grammar):
         start = "S"
-        generator = parser.GenerateLALR
+        generator = parser.GeneratePager
 
         @rule
         def S(self):
@@ -280,28 +325,28 @@ def test_grammar_ignore_trivia():
     assert tree == runtime.Tree(
         "sentence",
         0,
-        0,
+        3,
         (
             runtime.Tree(
                 "sentence",
                 0,
-                0,
+                1,
                 (
                     runtime.TokenValue(
                         "WORD",
                         0,
-                        0,
+                        1,
                         [],
-                        [runtime.TokenValue("BLANK", 0, 0, [], [])],
+                        [runtime.TokenValue("BLANK", 1, 2, [], [])],
                     ),
                 ),
             ),
             runtime.TokenValue(
                 "WORD",
-                0,
-                0,
-                [runtime.TokenValue("BLANK", 0, 0, [], [])],
-                [runtime.TokenValue("BLANK", 0, 0, [], [])],
+                2,
+                3,
+                [runtime.TokenValue("BLANK", 1, 2, [], [])],
+                [runtime.TokenValue("BLANK", 3, 4, [], [])],
             ),
         ),
     )
