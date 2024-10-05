@@ -67,7 +67,7 @@ def test_lr0_lr0():
 
 
 def test_all_generators():
-    """An LR0 grammar should work with an LR0 generator."""
+    """This grammar should work with everything honestly."""
 
     class G(Grammar):
         start = "E"
