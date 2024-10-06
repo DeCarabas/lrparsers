@@ -80,23 +80,22 @@ import parser.runtime as runtime
 import pyodide.code
 import pyodide.ffi as ffi
 
-GRAMMAR_GLOBALS = {}
 GRAMMAR = None
 PARSE_TABLE = None
 LEXER = None
 
 def eval_grammar(code):
-  global GRAMMAR_GLOBALS
   global GRAMMAR
   global PARSE_TABLE
   global LEXER
 
   try:
     dingus.post_grammar_status("Evaluating grammar...")
-    pyodide.code.eval_code(code, globals=GRAMMAR_GLOBALS)
+    grammar_globals={}
+    pyodide.code.eval_code(code, globals=grammar_globals)
 
     grammar = None
-    for key, value in GRAMMAR_GLOBALS.items():
+    for key, value in grammar_globals.items():
       if isinstance(value, type) and issubclass(value, parser.Grammar) and value is not parser.Grammar:
         value = value()
 
