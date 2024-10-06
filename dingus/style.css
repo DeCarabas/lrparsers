@@ -57,6 +57,10 @@ body {
   margin-left: 1rem;
 }
 
+.parsed-error-node {
+  color: red;
+}
+
 .main-textarea {
   height: 100%;
   width: 100%;

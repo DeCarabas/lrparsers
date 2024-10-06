@@ -72,8 +72,6 @@ let grammar_editor = null;
 let input_editor = null;
 
 function render_parse_results(message) {
-  console.log("WHAT?");
-
   function render_tree_node(parent, node) {
     const tree_div = document.createElement("div");
     tree_div.classList.add("parsed-node");
@@ -89,7 +87,11 @@ function render_parse_results(message) {
         {scroll: true},
       );
     };
+    if (node.start == node.end) {
+      node_label.classList.add("parsed-error-node");
+    }
     tree_div.appendChild(node_label);
+
 
     if (node.kind === "tree") {
       tree_div.classList.add("parsed-tree");
