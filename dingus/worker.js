@@ -31,9 +31,15 @@ const dingus_module = {
     postMessage({kind: "grammar", status: "ok", message: msg});
   },
 
-  post_grammar_error: function(error) {
-    console.log("Grammar Error:", error);
-    postMessage({kind:"grammar", status: "error", message: error});
+  post_grammar_error: function(errors) {
+    errors = data_to_js(errors);
+    console.log("Grammar Error:", errors);
+    postMessage({
+      kind:"grammar",
+      status: "error",
+      message: "An error occurred loading the grammar",
+      errors: errors,
+    });
   },
 
   post_doc_parse: function(tree, errors) {
@@ -50,9 +56,15 @@ const dingus_module = {
     });
   },
 
-  post_doc_error: function(error) {
-    console.log("Doc Error:", error);
-    postMessage({kind:"input", status: "error", message: error});
+  post_doc_error: function(errors) {
+    errors = data_to_js(errors);
+    console.log("Doc Error:", errors);
+    postMessage({
+      kind:"input",
+      status: "error",
+      message: "An error occurred parsing the document",
+      errors: errors,
+    });
   },
 };
 
@@ -91,6 +103,7 @@ def eval_grammar(code):
 
   try:
     dingus.post_grammar_status("Evaluating grammar...")
+    print("Hey?")
     grammar_globals={}
     pyodide.code.eval_code(code, globals=grammar_globals)
 
@@ -119,8 +132,9 @@ def eval_grammar(code):
     dingus.post_grammar_loaded(grammar.name)
 
   except Exception as e:
-    traceback.print_exc()
-    dingus.post_grammar_error(f"{e}")
+    ohno = traceback.format_exc()
+    print(f"grammar: {ohno}")
+    dingus.post_grammar_error(ohno.splitlines())
 
 def tree_to_js(tree):
   if tree is None:
@@ -151,8 +165,9 @@ def eval_document(code):
     tree, errors = runtime.parse(PARSE_TABLE, LEXER, code)
     dingus.post_doc_parse(tree_to_js(tree), errors)
   except Exception as e:
-    traceback.print_exc()
-    dingus.post_doc_error(f"{e}")
+    ohno = traceback.format_exc()
+    print(f"doc: {ohno}")
+    dingus.post_doc_error(ohno.splitlines())
 `);
 
   dingus_module.post_grammar_status("Ready.");

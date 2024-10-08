@@ -1,4 +1,16 @@
 const STATUS = document.getElementById("status-line");
+const ERRORS = document.getElementById("error-root");
+const TREE = document.getElementById("tree-root");
+
+function show_tree() {
+  ERRORS.classList.add("hidden");
+  TREE.classList.remove("hidden");
+}
+
+function show_errors() {
+  ERRORS.classList.remove("hidden");
+  TREE.classList.add("hidden");
+}
 
 const DOC_CHAINS = {};
 function chain_document_submit(kind, editor, on_success) {
@@ -33,6 +45,10 @@ function chain_document_submit(kind, editor, on_success) {
 
     if (message.status === "ok" && on_success) {
       on_success(message);
+    }
+
+    if (message.status === "error") {
+      render_errors(message.errors);
     }
   }
   DOC_CHAINS[kind] = on_result;
@@ -71,6 +87,10 @@ worker.onmessage = (e) => {
 let grammar_editor = null;
 let input_editor = null;
 
+function render_errors(errors) {
+  ERRORS.innerText = errors.join("\n")
+}
+
 function render_parse_results(message) {
   function render_tree_node(parent, node) {
     const tree_div = document.createElement("div");
@@ -104,9 +124,10 @@ function render_parse_results(message) {
     parent.appendChild(tree_div);
   }
 
-  const root = document.getElementById("output-root");
+  const root = document.getElementById("tree-root");
   root.innerHTML = "";
   render_tree_node(root, message.tree);
+  render_errors(message.errors);
 }
 
 function setup_editors() {

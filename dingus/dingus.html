@@ -15,19 +15,37 @@
   </head>
   <body>
     <div class="page-container">
-      <div class="grammar-container">
+      <div class="panel-top grammar-title">
+        Write Your Grammar Here
+      </div>
+
+      <div class="panel grammar-container">
         <textarea id="grammar" name="grammar" class="main-textarea"></textarea>
       </div>
-      <div class="status">
+
+      <div class="panel status">
         <span id="status-line">Loading python...</span>
       </div>
 
-      <div class="input-container">
+      <div class="panel-top input-title">
+        Write In Your Language Here
+      </div>
+
+      <div class="panel input-container">
         <textarea id="input" name="input" class="main-textarea"></textarea>
       </div>
 
-      <div class="results-container">
-        <div id="output-root" />
+      <div class="panel-top result-selector">
+        <span>Results</span>
+        <span class="result-selector-buttons">
+          <button id="tree-button">Tree</button>
+          <button id="errors-button">Errors</button>
+        </span>
+      </div>
+
+      <div class="panel results-container">
+        <pre id="error-root"></pre>
+        <div id="tree-root"></div>
       </div>
     </div>
 
