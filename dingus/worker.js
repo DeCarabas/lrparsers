@@ -103,7 +103,6 @@ def eval_grammar(code):
 
   try:
     dingus.post_grammar_status("Evaluating grammar...")
-    print("Hey?")
     grammar_globals={}
     pyodide.code.eval_code(code, globals=grammar_globals)
 
@@ -134,7 +133,7 @@ def eval_grammar(code):
   except Exception as e:
     ohno = traceback.format_exc()
     print(f"grammar: {ohno}")
-    dingus.post_grammar_error(ohno.splitlines())
+    dingus.post_grammar_error([ohno])
 
 def tree_to_js(tree):
   if tree is None:
@@ -167,7 +166,7 @@ def eval_document(code):
   except Exception as e:
     ohno = traceback.format_exc()
     print(f"doc: {ohno}")
-    dingus.post_doc_error(ohno.splitlines())
+    dingus.post_doc_error([ohno])
 `);
 
   dingus_module.post_grammar_status("Ready.");

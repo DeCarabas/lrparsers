@@ -85,6 +85,10 @@ body {
   color: red;
 }
 
+.error-panel {
+  margin: 1rem;
+}
+
 .main-textarea {
   height: 100%;
   width: 100%;

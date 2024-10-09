@@ -1,10 +1,12 @@
 const STATUS = document.getElementById("status-line");
-const ERRORS = document.getElementById("error-root");
-const TREE = document.getElementById("tree-root");
+const OUTPUT = document.getElementById("output-root");
+const TREE_BUTTON = document.getElementById("tree-button");
+const ERRORS_BUTTON = document.getElementById("errors-button");
 
 const INITIAL_STATE = {
   worker: null,
   status: "Initializing...",
+  output_mode: "errors",
   tree: null,
   errors: [],
   grammar: {
@@ -64,11 +66,53 @@ function render_tree_node(node, input_editor) {
 function render_state(state, input_editor) {
   STATUS.innerText = state.status;
 
-  ERRORS.innerText = state.errors.join("\n");
+  const error_count = state.errors.length;
+  if (error_count > 0) {
+    ERRORS_BUTTON.disabled = false;
+    if (error_count > 1) {
+      ERRORS_BUTTON.innerText = `${error_count} errors`;
+    } else {
+      ERRORS_BUTTON.innerText = `1 error`;
+    }
+  } else {
+    ERRORS_BUTTON.innerText = "No errors";
+    ERRORS_BUTTON.disabled = true;
+  }
 
-  TREE.innerHTML = "";
   if (state.tree) {
-    TREE.appendChild(render_tree_node(state.tree, input_editor));
+    TREE_BUTTON.innerText = "Tree";
+    TREE_BUTTON.disabled = false;
+  } else {
+    TREE_BUTTON.innerText = "No tree";
+    TREE_BUTTON.disabled = true;
+  }
+
+  if (state.output_mode === "errors") {
+    const error_node = document.createElement("pre");
+    error_node.classList.add("error-panel");
+    if (state.errors.length == 0) {
+      if (state.tree) {
+        error_node.innerText = "No errors. Click the 'tree' button to see the parse tree.";
+      } else {
+        error_node.innerText = "No errors.";
+      }
+    } else {
+      error_node.innerText = state.errors.join("\n");
+    }
+
+    OUTPUT.replaceChildren(error_node);
+  } else if (state.output_mode === "tree") {
+    if (state.tree) {
+      OUTPUT.replaceChildren(render_tree_node(state.tree, input_editor));
+    } else {
+      if (state.errors.length === 1) {
+        OUTPUT.replaceChildren("No parse tree. Click the 'error' button to see the error.");
+      } else if (state.errors.length > 0) {
+        OUTPUT.replaceChildren("No parse tree. Click the 'error' button to see the errors.");
+      } else {
+        OUTPUT.replaceChildren("No parse tree.");
+      }
+    }
   }
 }
 
@@ -140,8 +184,8 @@ function update(state, message) {
       }
 
       if (message.status === "error") {
-        // Record the errors.
-        new_state.errors = [];
+        new_state.errors = message.errors;
+        new_state.tree = null;
       }
     }
   }
@@ -158,14 +202,24 @@ function update(state, message) {
       new_state.input = rotate_document(new_state.worker, "input", new_state.input);
 
       if (message.status === "ok") {
+        // On parse, there can still be errors even if the status is ok.
         new_state.tree = message.tree;
         new_state.errors = message.errors;
       }
 
       if (message.status === "error") {
+        new_state.tree = null;
         new_state.errors = message.errors;
       }
     }
+  }
+
+  if (message.kind === "tree_button") {
+    new_state.output_mode = "tree";
+  }
+
+  if (message.kind === "errors_button") {
+    new_state.output_mode = "errors";
   }
 
   //console.log(state, message, new_state);
@@ -238,6 +292,9 @@ function setup_editors() {
 
   setup_editor("grammar", grammar_editor, handler);
   setup_editor("input", input_editor, handler);
+
+  TREE_BUTTON.onclick = () => handler({kind: "tree_button"});
+  ERRORS_BUTTON.onclick = () => handler({kind: "errors_button"});
 }
 
 setup_editors();
