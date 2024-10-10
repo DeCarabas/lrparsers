@@ -1,2 +1,0 @@
-- Generate LALR lookaheads directly from LR0 states, not as LR1 + Merge, for speed
-  (Alternately, implement the Pager/Chen algorithm on LR1 for state merging)

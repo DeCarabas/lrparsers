@@ -1369,7 +1369,7 @@ class GenerateSLR1(GenerateLR0):
         super().__init__(*args, **kwargs)
 
         # We store the firsts not because we need them here, but because LR1
-        # and LALR need them.
+        # and Pager need them.
         self._firsts = FirstInfo.from_grammar(self.grammar, self.terminal)
         self._follows = FollowInfo.from_grammar(
             self.grammar,
@@ -1483,111 +1483,6 @@ class GenerateLR1(GenerateSLR1):
         return self.gen_sets(seeds)
 
 
-class GenerateLALR(GenerateLR1):
-    """Generate tables for LALR.
-
-    LALR is smaller than LR(1) but bigger than SLR(1). It works by generating
-    the LR(1) configuration sets, but merging configuration sets which are
-    equal in everything but their lookaheads. This works in that it doesn't
-    generate any shift/reduce conflicts that weren't already in the LR(1)
-    grammar. It can, however, introduce new reduce/reduce conflicts, because
-    it does lose information. The advantage is that the number of parser
-    states is much much smaller in LALR than in LR(1).
-
-    If you can get away with generating LALR tables for a grammar than you
-    should do it.
-
-    (Note that because we use immutable state everywhere this generator does
-    a lot of copying and allocation. This particular generator could still
-    use a bunch of improvement, probably.)
-    """
-
-    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
-        """Recursively generate all configuration sets starting from the
-        provided set.
-
-        The difference between this method and the one in GenerateLR0, where
-        this comes from, is that we're going to be keeping track of states
-        that we found that are equivalent in lookahead.
-        """
-        #
-        # First, do the actual walk. Don't merge yet: just keep track of all
-        # the config sets that need to be merged.
-        #
-        F: dict[CoreSet, list[ConfigSet]] = {}
-        seen: set[ConfigSet] = set()
-        closed_cores: dict[CoreSet, CoreSet] = {}
-        successors: list[typing.Tuple[CoreSet, int, CoreSet]] = []
-
-        pending = [(ConfigSet(seeds), CoreSet(s.core for s in seeds))]
-        while len(pending) > 0:
-            seed_set, seed_core = pending.pop()
-            if seed_set in seen:
-                continue
-            seen.add(seed_set)
-
-            closure = self.gen_closure(seed_set)
-            closure_core = CoreSet(s.core for s in closure)
-            closed_cores[seed_core] = closure_core
-
-            existing = F.get(closure_core)
-            if existing is not None:
-                existing.append(closure)
-            else:
-                F[closure_core] = [closure]
-
-            for symbol, successor in self.gen_all_successors(closure):
-                successor_seed_core = CoreSet(s.core for s in successor)
-                successors.append((closure_core, symbol, successor_seed_core))
-                pending.append((successor, successor_seed_core))
-
-        # Now we gathered the sets, merge them all.
-        final_sets: dict[CoreSet, ConfigSet] = {}
-        for key, config_sets in F.items():
-            la_merge: dict[ConfigurationCore, set[int]] = {}
-            for config_set in config_sets:
-                for config in config_set:
-                    la_key = config.core
-                    la_set = la_merge.get(la_key)
-                    if la_set is None:
-                        la_merge[la_key] = set(config.lookahead)
-                    else:
-                        la_set.update(config.lookahead)
-
-            final_set = ConfigSet(
-                Configuration(core=core, lookahead=tuple(sorted(la)))
-                for core, la in la_merge.items()
-            )
-            final_sets[key] = final_set
-
-        # Register all the actually merged, final config sets.
-        result = ConfigurationSetInfo()
-        for config_set in final_sets.values():
-            # Because we're building this so late we don't distinguish.
-            # This is probably a hack, and a sign the tracker should be better.
-            id, _ = result.register_core(config_set)
-            result.register_config_closure(id, config_set)
-
-        # Now record all the successors that we found. Of course, the actual
-        # sets that wound up in the ConfigurationSetInfo don't match anything
-        # we found during the previous phase.
-        #
-        # *Fortunately* we recorded the no-lookahead keys in the successors
-        # so we can find the final sets, then look them up in the registered
-        # sets, and actually register the successor.
-        for config_core, symbol, successor_seed_core in successors:
-            actual_config_set = final_sets[config_core]
-            from_index = result.config_set_key[actual_config_set]
-
-            successor_no_la = closed_cores[successor_seed_core]
-            actual_successor = final_sets[successor_no_la]
-            to_index = result.config_set_key[actual_successor]
-
-            result.add_successor(from_index, symbol, to_index)
-
-        return result
-
-
 # Here we have a slightly different definition of a ConfigurationSet; we keep the
 # lookaheads outside and use a dictionary to check for containment quickly.
 # ItemSet is used in the GRM/Pager/Chin algorithm.
@@ -1673,16 +1568,41 @@ class ItemSet:
 
 
 class GeneratePager(GenerateLR1):
-    """Pager's algorithm as interpreted through GRMTools"""
+    """Pager's algorithm.
+
+    I'll be honest, I don't understnd this one as well as the pure LR1
+    algorithm. It proceeds as LR1, generating successor states, but every
+    time it makes a new state it searches the states it has already made for
+    one that is "weakly compatible;" ifit finds one it merges the new state
+    with the old state and marks the old state to be re-visited.
+
+    The implementation here follows from the implementation in
+    `GRMTools<https://github.com/softdevteam/grmtools/blob/master/lrtable/src/lib/pager.rs>`_.
+
+    As they explain there:
+
+    > The general algorithms that form the basis of what's used in this file
+    > can be found in:
+    >
+    >      A Practical General Method for Constructing LR(k) Parsers
+    >         David Pager, Acta Informatica 7, 249--268, 1977
+    >
+    > However Pager's paper is dense, and doesn't name sub-parts of the
+    > algorithm. We mostly reference the (still incomplete, but less
+    > incomplete) version of the algorithm found in:
+    >
+    >      Measuring and extending LR(1) parser generation
+    >         Xin Chen, PhD thesis, University of Hawaii, 2009
+    """
 
     def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
         # This function can be seen as a modified version of items() from
         # Chen's dissertation.
         #
-        # (It is also (practically) a converted version from grmtools into
-        # python, more or less verbatim at this point. I have no idea what's
-        # going on.)
-        # firsts = self._firsts
+        # DOTY: It is also (practically) a converted version from grmtools
+        #       into python, more or less verbatim at this point. I have some
+        #       sense of what is going on, and attempt to elaborate with
+        #       these comments.
 
         # closed_states and core_states are both equally sized vectors of
         # states. Core states are smaller, and used for the weakly compatible
@@ -1693,34 +1613,20 @@ class GeneratePager(GenerateLR1):
         core_states: list[ItemSet] = []
         edges: list[dict[int, int]] = []
 
-        # Because we GC states later, it's possible that we will end up with
-        # more states before GC than `StorageT` can hold. We thus do all our
-        # calculations in this function in terms of `usize`s before
-        # converting them to `StorageT` later.
-        #
-        # DOTY: This comment is useless for us: we don't optimize the storage
-        #       of the state graph so StorageT is useless.
-        #
-        # DOTY: This next bit here is basically figuring out the seeds, which
-        #       we have already done. We just need to convert them into an
-        #       itemset.
-        #
+        # Convert the incoming seed configurations into item sets.
+        # TODO: Convert everything to ItemSet natively.
         state0 = ItemSet({seed.core: set(seed.lookahead) for seed in seeds})
         core_states.append(state0)
         closed_states.append(None)
         edges.append({})
 
-        # We maintain two lists of which rules and tokens we've seen; when
-        # processing a given state there's no point processing a rule or token
-        # more than once.
-        #
-        # DOTY: Our alphabet is in a single range so we just have a single set.
+        # We maintain a set of which rules and tokens we've seen; when
+        # processing a given state there's no point processing a rule or
+        # token more than once.
         seen: set[int] = set()
 
         # new_states is used to separate out iterating over states vs.
         # mutating it
-        #
-        # DOTY: TODO: Do we need this?
         new_states: list[tuple[int, ItemSet]] = []
 
         # cnd_[rule|token]_weaklies represent which states are possible weakly

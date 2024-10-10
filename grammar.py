@@ -24,7 +24,6 @@ from parser import (
 class FineGrammar(Grammar):
     # generator = parser.GenerateLR1
     # generator = parser.GeneratePager
-    # generator = parser.GenerateLALR
     start = "File"
 
     trivia = ["BLANKS", "LINE_BREAK", "COMMENT"]
