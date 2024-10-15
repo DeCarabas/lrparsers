@@ -42,7 +42,7 @@ def test_lr0_lr0():
 
     class G(Grammar):
         start = "E"
-        generator = parser.GenerateLR0
+        # generator = parser.GenerateLR0
 
         @rule
         def E(self):
@@ -86,7 +86,7 @@ def test_all_generators():
         IDENTIFIER = Terminal("id", name="id")
 
     GENERATORS = [
-        parser.GenerateLR0,
+        # parser.GenerateLR0,
         parser.GeneratePager,
         parser.GenerateLR1,
     ]
@@ -104,121 +104,9 @@ def test_all_generators():
         assert tree == _tree(("E", ("E", ("T", "id")), "+", ("T", "(", ("E", ("T", "id")), ")")))
 
 
-def test_lr0_shift_reduce():
-    """This one should not work in LR0- it has a shift/reduce conflict, but works in SLR1."""
-
-    class G(Grammar):
-        start = "E"
-        generator = parser.GenerateLR0
-
-        @rule
-        def E(self):
-            return seq(self.E, self.PLUS, self.T) | self.T
-
-        @rule
-        def T(self):
-            return (
-                seq(self.LPAREN, self.E, self.RPAREN)
-                | self.IDENTIFIER
-                | seq(self.IDENTIFIER, self.LSQUARE, self.E, self.RSQUARE)
-            )
-
-        PLUS = Terminal("+")
-        LPAREN = Terminal("(")
-        RPAREN = Terminal(")")
-        LSQUARE = Terminal("[")
-        RSQUARE = Terminal("]")
-        IDENTIFIER = Terminal("id")
-
-    with pytest.raises(parser.AmbiguityError):
-        G().build_table()
-
-    G().build_table(generator=parser.GenerateSLR1)
-
-
-def test_lr0_reduce_reduce():
-    """This one should not work, it has a reduce-reduce conflict."""
-
-    class G(Grammar):
-        start = "E"
-        generator = parser.GenerateLR0
-
-        @rule
-        def E(self):
-            return seq(self.E, self.PLUS, self.T) | self.T | seq(self.V, self.EQUAL, self.E)
-
-        @rule
-        def T(self):
-            return seq(self.LPAREN, self.E, self.RPAREN) | self.IDENTIFIER
-
-        @rule
-        def V(self):
-            return self.IDENTIFIER
-
-        PLUS = Terminal("+")
-        EQUAL = Terminal("=")
-        LPAREN = Terminal("(")
-        RPAREN = Terminal(")")
-        IDENTIFIER = Terminal("id")
-
-    with pytest.raises(parser.AmbiguityError):
-        G().build_table()
-
-
-def test_lr0_empty():
-    """LR0 can't handle empty productions because it doesn't know when to reduce."""
-
-    class G(Grammar):
-        start = "E"
-        generator = parser.GenerateLR0
-
-        @rule
-        def E(self):
-            return seq(self.F, self.BOOP)
-
-        @rule
-        def F(self):
-            return self.BEEP | parser.Nothing
-
-        BOOP = Terminal("boop")
-        BEEP = Terminal("beep")
-
-    with pytest.raises(parser.AmbiguityError):
-        G().build_table()
-
-
-def test_grammar_aho_ullman_1():
-    class G(Grammar):
-        start = "S"
-        generator = parser.GenerateSLR1
-
-        @rule
-        def S(self):
-            return seq(self.L, self.EQUAL, self.R) | self.R
-
-        @rule
-        def L(self):
-            return seq(self.STAR, self.R) | self.ID
-
-        @rule
-        def R(self):
-            return self.L
-
-        EQUAL = Terminal("=")
-        STAR = Terminal("*")
-        ID = Terminal("id")
-
-    with pytest.raises(parser.AmbiguityError):
-        G().build_table()
-
-    G().build_table(generator=parser.GenerateLR1)
-    G().build_table(generator=parser.GeneratePager)
-
-
 def test_grammar_aho_ullman_2():
     class TestGrammar(Grammar):
         start = "S"
-        generator = parser.GenerateSLR1
 
         @rule
         def S(self):
@@ -231,7 +119,6 @@ def test_grammar_aho_ullman_2():
         A = Terminal("a")
         B = Terminal("b")
 
-    TestGrammar().build_table()
     TestGrammar().build_table(generator=parser.GenerateLR1)
     TestGrammar().build_table(generator=parser.GeneratePager)
 

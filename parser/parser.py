@@ -158,7 +158,8 @@ class ConfigurationCore(typing.NamedTuple):
 
     # TODO: Possible improvement: make `symbols` an index into a production
     #       list. This would not make this smaller but it might make comparisons
-    #       faster.
+    #       faster. This could also just be a production index and a position,
+    #       we could find the name from the production index, etc.
     name: int
     symbols: typing.Tuple[int, ...]
     position: int
@@ -271,98 +272,6 @@ class Configuration(typing.NamedTuple):
 
 class ConfigSet(frozenset[Configuration]):
     pass
-
-
-# Here we have a slightly different definition of a ConfigurationSet; we keep the
-# lookaheads outside and use a dictionary to check for containment quickly.
-# ItemSet is used in the GRM/Pager/Chin algorithm.
-@dataclasses.dataclass
-class ItemSet:
-    """An ItemSet is a group of configuration cores together with their
-    "contexts", or lookahead sets.
-
-    An ItemSet is comparable for equality, and also supports this lesser notion
-    of "weakly compatible" which is used to collapse states in the pager
-    algorithm.
-    """
-
-    items: dict[ConfigurationCore, set[int]]
-
-    def __init__(self, items=None):
-        self.items = items or {}
-
-    @classmethod
-    def from_config_set(cls, config_set: ConfigSet) -> "ItemSet":
-        return ItemSet({config.core: set(config.lookahead) for config in config_set})
-
-    def weakly_compatible(self, other: "ItemSet") -> bool:
-        a = self.items
-        b = other.items
-
-        if len(a) != len(b):
-            return False
-
-        for acore in a:
-            if acore not in b:
-                return False
-
-        if len(a) == 1:
-            return True
-
-        # DOTY: This loop I do not understand, truly. What the heck is happening here?
-        a_keys = list(a.keys())
-        for i, i_key in enumerate(itertools.islice(a_keys, 0, len(a_keys) - 1)):
-            for j_key in itertools.islice(a_keys, i + 1, None):
-                a_i_key = a[i_key]
-                b_i_key = b[i_key]
-                a_j_key = a[j_key]
-                b_j_key = b[j_key]
-
-                # DOTY: GRMTools written with intersects(); we don't have that we have
-                #       `not disjoint()`. :P There are many double negatives....
-                #
-                #  not (intersect(a_i, b_j) or intersect(a_j, b_i))
-                #  not ((not disjoint(a_i, b_j)) or (not disjoint(a_j, b_i)))
-                #  ((not not disjoint(a_i, b_j)) and (not not disjoint(a_j, b_i)))
-                #  disjoint(a_i, b_j) and disjoint(a_j, b_i)
-                if a_i_key.isdisjoint(b_j_key) and a_j_key.isdisjoint(b_i_key):
-                    continue
-
-                # intersect(a_i, a_j) or intersect(b_i, b_j)
-                # (not disjoint(a_i, a_j)) or (not disjoint(b_i, b_j))
-                # not (disjoint(a_i, a_j) and disjoint(b_i, b_j))
-                if not (a_i_key.isdisjoint(a_j_key) and b_i_key.isdisjoint(b_j_key)):
-                    continue
-
-                return False
-
-        return True
-
-    def weakly_merge(self, other: "ItemSet") -> bool:
-        """Merge b into a, returning True if this lead to any changes."""
-        a = self.items
-        b = other.items
-
-        changed = False
-        for a_key, a_ctx in a.items():
-            start_len = len(a_ctx)
-            a_ctx.update(b[a_key])  # Python doesn't tell us changes
-            changed = changed or (start_len != len(a_ctx))
-
-        return changed
-
-    def goto(self, symbol: int) -> "ItemSet":
-        result = ItemSet()
-        for core, context in self.items.items():
-            if core.next == symbol:
-                next = core.replace_position(core.position + 1)
-                result.items[next] = set(context)
-        return result
-
-    def to_config_set(self) -> ConfigSet:
-        return ConfigSet(
-            {Configuration(core, tuple(sorted(ctx))) for core, ctx in self.items.items()}
-        )
 
 
 class ConfigurationSetInfo:
@@ -876,338 +785,6 @@ class TableBuilder(object):
         self.action_row[symbol_id] = (action, config)
 
 
-class GenerateLR0:
-    """Generate parser tables for an LR0 parser."""
-
-    # Internally we use integers as symbols, not strings. Mostly this is fine,
-    # but when we need to map back from integer to string we index this list.
-    alphabet: list[str]
-
-    # The grammar we work with. The outer list is indexed by grammar symbol,
-    # terminal *and* non-terminal. The inner list is the list of productions
-    # for the given nonterminal symbol. (If you have a terminal `t` and look it
-    # up you'll just get an empty list.)
-    grammar: list[list[typing.Tuple[int, ...]]]
-
-    # nonterminal[i] is True if alphabet[i] is a nonterminal.
-    nonterminal: typing.Tuple[bool, ...]
-    # The complement of nonterminal. terminal[i] is True if alphabet[i] is a
-    # terminal.
-    terminal: typing.Tuple[bool, ...]
-
-    # The precedence of every symbol. If no precedence was explicitly provided
-    # for a symbol, then its entry in this tuple will be (NONE, 0).
-    precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
-
-    # The set of symbols for which we should reduce "transparently." This doesn't
-    # affect state generation at all, only the generation of the final table.
-    transparents: set[str]
-
-    # The lookup that maps a particular symbol to an integer. (Only really used
-    # for debugging.)
-    symbol_key: dict[str, int]
-    # The start symbol of the grammar.
-    start_symbol: int
-    # The end symbol of the grammar.
-    end_symbol: int
-
-    def __init__(
-        self,
-        start: str,
-        grammar: list[typing.Tuple[str, list[str]]],
-        precedence: None | dict[str, typing.Tuple[Assoc, int]] = None,
-        transparents: None | set[str] = None,
-    ):
-        """Initialize the parser generator with the specified grammar and
-        start symbol.
-
-        The input grammars are of the form:
-
-          grammar_simple = [
-            ('E', ['E', '+', 'T']),
-            ('E', ['T']),
-            ('T', ['(', 'E', ')']),
-            ('T', ['id']),
-          ]
-
-        Which is to say, they are a list of productions. Each production is a
-        tuple where the first element of the tuple is the name of the
-        non-terminal being added, and the second elment of the tuple is the
-        list of terminals and non-terminals that make up the production.
-
-        There is currently no support for custom actions or alternation or
-        anything like that. If you want alternations that you'll have to lower
-        the grammar by hand into the simpler form first.
-
-        Don't name anything with double-underscores; those are reserved for
-        the generator. Don't add '$' either, as it is reserved to mean
-        end-of-stream. Use an empty list to indicate nullability, that is:
-
-          ('O', []),
-
-        means that O can be matched with nothing.
-
-        This isn't a *great* way to author these things, but it is very simple
-        and flexible. You probably don't want to author this on your own; see
-        the Grammar class for a high-level API.
-
-        The precedence dictionary, if provided, maps a given symbol to an
-        associativity and a precedence. Any symbol not in the dictionary is
-        presumed to have an associativity of NONE and a precedence of zero.
-        """
-
-        # Work out the alphabet.
-        alphabet = set()
-        for name, rule in grammar:
-            alphabet.add(name)
-            alphabet.update(symbol for symbol in rule)
-
-        # Check to make sure they didn't use anything that will give us
-        # heartburn later.
-        reserved = [a for a in alphabet if a.startswith("__") or a == "$"]
-        if reserved:
-            raise ValueError(
-                "Can't use {symbols} in grammars, {what} reserved.".format(
-                    symbols=" or ".join(reserved),
-                    what="it's" if len(reserved) == 1 else "they're",
-                )
-            )
-
-        alphabet.add("__start")
-        alphabet.add("$")
-        self.alphabet = list(sorted(alphabet))
-
-        symbol_key = {symbol: index for index, symbol in enumerate(self.alphabet)}
-
-        start_symbol = symbol_key["__start"]
-        end_symbol = symbol_key["$"]
-
-        assert self.alphabet[start_symbol] == "__start"
-        assert self.alphabet[end_symbol] == "$"
-
-        # Turn the incoming grammar into a dictionary, indexed by nonterminal.
-        #
-        # We count on python dictionaries retaining the insertion order, like
-        # it or not.
-        full_grammar: list[list] = [list() for _ in self.alphabet]
-        terminal: list[bool] = [True for _ in self.alphabet]
-        assert terminal[end_symbol]
-
-        nonterminal = [False for _ in self.alphabet]
-
-        for name, rule in grammar:
-            name_symbol = symbol_key[name]
-
-            terminal[name_symbol] = False
-            nonterminal[name_symbol] = True
-
-            rules = full_grammar[name_symbol]
-            rules.append(tuple(symbol_key[symbol] for symbol in rule))
-
-        self.grammar = full_grammar
-        self.grammar[start_symbol].append((symbol_key[start],))
-        terminal[start_symbol] = False
-        nonterminal[start_symbol] = True
-
-        self.terminal = tuple(terminal)
-        self.nonterminal = tuple(nonterminal)
-
-        assert self.terminal[end_symbol]
-        assert self.nonterminal[start_symbol]
-
-        if precedence is None:
-            precedence = {}
-        self.precedence = tuple(precedence.get(a, (Assoc.NONE, 0)) for a in self.alphabet)
-
-        if transparents is None:
-            transparents = set()
-        self.transparents = transparents
-
-        self.symbol_key = symbol_key
-        self.start_symbol = start_symbol
-        self.end_symbol = end_symbol
-
-    def gen_closure_next(self, config: Configuration):
-        """Return the next set of configurations in the closure for config.
-
-        If the position for config is just before a non-terminal, then the
-        next set of configurations is configurations for all of the
-        productions for that non-terminal, with the position at the
-        beginning. (If the position for config is just before a terminal,
-        or at the end of the production, then the next set is empty.)
-        """
-        next = config.core.next
-        if next is None:
-            return ()
-        else:
-            return tuple(Configuration.from_rule(next, rule) for rule in self.grammar[next])
-
-    def gen_closure(self, seeds: typing.Iterable[Configuration]) -> ConfigSet:
-        """Compute the closure for the specified configs. The closure is all
-        of the configurations we could be in. Specifically, if the position
-        for a config is just before a non-terminal then we must also consider
-        configurations where the rule is the rule for the non-terminal and
-        the position is just before the beginning of the rule.
-
-        (We have replaced a recursive version with an iterative one.)
-        """
-        closure: set[Configuration] = set()
-        pending = list(seeds)
-        pending_next = []
-        while len(pending) > 0:
-            for config in pending:
-                if config in closure:
-                    continue
-
-                closure.add(config)
-                pending_next.extend(self.gen_closure_next(config))
-
-            temp = pending
-            pending = pending_next
-            pending_next = temp
-            pending_next.clear()
-
-        # NOTE: The generation of this closure *might* have generated
-        #       multiple cores with different lookaheads; if that's
-        #       the case we need to merge.
-        merged: dict[ConfigurationCore, set[int]] = {}
-        for c in closure:
-            existing = merged.get(c.core)
-            if existing is not None:
-                existing.update(c.lookahead)
-            else:
-                merged[c.core] = set(c.lookahead)
-
-        return ConfigSet(Configuration(k, tuple(sorted(v))) for k, v in merged.items())
-
-    def gen_all_successors(
-        self, config_set: typing.Iterable[Configuration]
-    ) -> list[typing.Tuple[int, ConfigSet]]:
-        """Return all of the non-empty successors for the given config set.
-
-        (That is, given the config set, pretend we see all the symbols we
-        could possibly see, and figure out which configs sets we get from
-        those symbols. Those are the successors of this set.)
-        """
-        possible = {config.core.next for config in config_set if config.core.next is not None}
-
-        next = []
-        for symbol in possible:
-            seeds = ConfigSet(
-                config.replace_position(config.core.position + 1)
-                for config in config_set
-                if config.core.next == symbol
-            )
-            if len(seeds) > 0:
-                next.append((symbol, seeds))
-
-        return next
-
-    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
-        """Generate all configuration sets starting from the provided seeds."""
-        result = ConfigurationSetInfo()
-
-        successors = []
-        pending = [ConfigSet(seeds)]
-        pending_next = []
-        while len(pending) > 0:
-            for core in pending:
-                id, is_new = result.register_core(core)
-                if is_new:
-                    config_set = self.gen_closure(core)
-                    result.register_config_closure(id, config_set)
-                    for symbol, successor in self.gen_all_successors(config_set):
-                        successors.append((id, symbol, successor))
-                        pending_next.append(successor)
-
-            temp = pending
-            pending = pending_next
-            pending_next = temp
-            pending_next.clear()
-
-        for id, symbol, successor in successors:
-            result.add_successor(id, symbol, result.core_key[successor])
-
-        return result
-
-    def gen_all_sets(self) -> ConfigurationSetInfo:
-        """Generate all of the configuration sets for the grammar."""
-        seeds = [
-            Configuration.from_rule(self.start_symbol, rule)
-            for rule in self.grammar[self.start_symbol]
-        ]
-        return self.gen_sets(seeds)
-
-    def gen_reduce_set(self, config: Configuration) -> typing.Iterable[int]:
-        """Return the set of symbols that indicate we should reduce the given
-        configuration.
-
-        In an LR0 parser, this is just the set of all terminals.
-        """
-        del config
-        return [index for index, value in enumerate(self.terminal) if value]
-
-    def gen_table(self) -> ParseTable:
-        """Generate the parse table.
-
-        The parse table is a list of states. The first state in the list is
-        the starting state. Each state is a dictionary that maps a symbol to an
-        action. Each action is a tuple. The first element of the tuple is a
-        string describing what to do:
-
-        - 'shift': The second element of the tuple is the state
-          number. Consume the input and push that state onto the stack.
-
-        - 'reduce': The second element is the name of the non-terminal being
-          reduced, and the third element is the number of states to remove
-          from the stack. Don't consume the input; just remove the specified
-          number of things from the stack, and then consult the table again,
-          this time using the new top-of-stack as the current state and the
-          name of the non-terminal to find out what to do.
-
-        - 'goto': The second element is the state number to push onto the
-          stack. In the literature, these entries are treated distinctly from
-          the actions, but we mix them here because they never overlap with the
-          other actions. (These are always associated with non-terminals, and
-          the other actions are always associated with terminals.)
-
-        - 'accept': Accept the result of the parse, it worked.
-
-        Anything missing from the row indicates an error.
-        """
-        config_sets = self.gen_all_sets()
-        # print(config_sets.dump_state(self.alphabet))
-        builder = TableBuilder(self.alphabet, self.precedence, self.transparents)
-
-        for config_set_id, config_set in enumerate(config_sets.closures):
-            assert config_set is not None
-            builder.new_row(config_set)
-            successors = config_sets.successors[config_set_id]
-
-            for config in config_set:
-                config_next = config.core.next
-                if config_next is None:
-                    if config.core.name != self.start_symbol:
-                        for a in self.gen_reduce_set(config):
-                            builder.set_table_reduce(a, config)
-                    else:
-                        builder.set_table_accept(self.end_symbol, config)
-
-                elif self.terminal[config_next]:
-                    index = successors[config_next]
-                    builder.set_table_shift(config_next, index, config)
-
-            # Gotos
-            for symbol, index in successors.items():
-                if self.nonterminal[symbol]:
-                    builder.set_table_goto(symbol, index)
-
-        return builder.flush(config_sets)
-
-
-###############################################################################
-# SLR(1)
-###############################################################################
 def update_changed(items: set[int], other: set[int]) -> bool:
     """Merge the `other` set into the `items` set, and return True if this
     changed the items set.
@@ -1430,32 +1007,264 @@ class FollowInfo:
         return FollowInfo(follows=follows)
 
 
-class GenerateSLR1(GenerateLR0):
-    """Generate parse tables for SLR1 grammars.
+# Here we have a slightly different definition of a ConfigurationSet; we keep the
+# lookaheads outside and use a dictionary to check for containment quickly.
+# ItemSet is used in the GRM/Pager/Chin algorithm.
+@dataclasses.dataclass
+class ItemSet:
+    """An ItemSet is a group of configuration cores together with their
+    "contexts", or lookahead sets.
 
-    SLR1 parsers can recognize more than LR0 parsers, because they have a
-    little bit more information: instead of generating reduce actions for a
-    production on all possible inputs, as LR0 parsers do, they generate
-    reduce actions only for inputs that are in the 'follow' set of the
-    non-terminal.
-
-    That means SLR1 parsers need to know how to generate 'follow(A)', which
-    means they need to know how to generate 'first(A)'. See FirstInfo and
-    FollowInfo for the details on how this is computed.
+    An ItemSet is comparable for equality, and also supports this lesser notion
+    of "weakly compatible" which is used to collapse states in the pager
+    algorithm.
     """
 
+    items: dict[ConfigurationCore, set[int]]
+
+    def __init__(self, items=None):
+        self.items = items or {}
+
+    @classmethod
+    def from_config_set(cls, config_set: ConfigSet) -> "ItemSet":
+        return ItemSet({config.core: set(config.lookahead) for config in config_set})
+
+    def weakly_compatible(self, other: "ItemSet") -> bool:
+        a = self.items
+        b = other.items
+
+        if len(a) != len(b):
+            return False
+
+        for acore in a:
+            if acore not in b:
+                return False
+
+        if len(a) == 1:
+            return True
+
+        # DOTY: This loop I do not understand, truly. What the heck is happening here?
+        a_keys = list(a.keys())
+        for i, i_key in enumerate(itertools.islice(a_keys, 0, len(a_keys) - 1)):
+            for j_key in itertools.islice(a_keys, i + 1, None):
+                a_i_key = a[i_key]
+                b_i_key = b[i_key]
+                a_j_key = a[j_key]
+                b_j_key = b[j_key]
+
+                # DOTY: GRMTools written with intersects(); we don't have that we have
+                #       `not disjoint()`. :P There are many double negatives....
+                #
+                #  not (intersect(a_i, b_j) or intersect(a_j, b_i))
+                #  not ((not disjoint(a_i, b_j)) or (not disjoint(a_j, b_i)))
+                #  ((not not disjoint(a_i, b_j)) and (not not disjoint(a_j, b_i)))
+                #  disjoint(a_i, b_j) and disjoint(a_j, b_i)
+                if a_i_key.isdisjoint(b_j_key) and a_j_key.isdisjoint(b_i_key):
+                    continue
+
+                # intersect(a_i, a_j) or intersect(b_i, b_j)
+                # (not disjoint(a_i, a_j)) or (not disjoint(b_i, b_j))
+                # not (disjoint(a_i, a_j) and disjoint(b_i, b_j))
+                if not (a_i_key.isdisjoint(a_j_key) and b_i_key.isdisjoint(b_j_key)):
+                    continue
+
+                return False
+
+        return True
+
+    def weakly_merge(self, other: "ItemSet") -> bool:
+        """Merge b into a, returning True if this lead to any changes."""
+        a = self.items
+        b = other.items
+
+        changed = False
+        for a_key, a_ctx in a.items():
+            start_len = len(a_ctx)
+            a_ctx.update(b[a_key])  # Python doesn't tell us changes
+            changed = changed or (start_len != len(a_ctx))
+
+        return changed
+
+    def goto(self, symbol: int) -> "ItemSet":
+        result = ItemSet()
+        for core, context in self.items.items():
+            if core.next == symbol:
+                next = core.replace_position(core.position + 1)
+                result.items[next] = set(context)
+        return result
+
+    def to_config_set(self) -> ConfigSet:
+        return ConfigSet(
+            {Configuration(core, tuple(sorted(ctx))) for core, ctx in self.items.items()}
+        )
+
+
+class GenerateLR1:
+    """Generate parse tables for LR1, or "canonical LR" grammars.
+
+    LR1 parsers can recognize more than SLR parsers. Like SLR parsers, they
+    are choosier about when they reduce. But unlike SLR parsers, they specify
+    the terminals on which they reduce by carrying a 'lookahead' terminal in
+    the configuration. The lookahead of a configuration is computed as the
+    closure of a configuration set is computed, so see gen_closure_next for
+    details. (Except for the start configuration, which has '$' as its
+    lookahead.)
+    """
+
+    # Internally we use integers as symbols, not strings. Mostly this is fine,
+    # but when we need to map back from integer to string we index this list.
+    alphabet: list[str]
+
+    # The grammar we work with. The outer list is indexed by grammar symbol,
+    # terminal *and* non-terminal. The inner list is the list of productions
+    # for the given nonterminal symbol. (If you have a terminal `t` and look it
+    # up you'll just get an empty list.)
+    grammar: list[list[typing.Tuple[int, ...]]]
+
+    # nonterminal[i] is True if alphabet[i] is a nonterminal.
+    nonterminal: typing.Tuple[bool, ...]
+    # The complement of nonterminal. terminal[i] is True if alphabet[i] is a
+    # terminal.
+    terminal: typing.Tuple[bool, ...]
+
+    # The precedence of every symbol. If no precedence was explicitly provided
+    # for a symbol, then its entry in this tuple will be (NONE, 0).
+    precedence: typing.Tuple[typing.Tuple[Assoc, int], ...]
+
+    # The set of symbols for which we should reduce "transparently." This doesn't
+    # affect state generation at all, only the generation of the final table.
+    transparents: set[str]
+
+    # The lookup that maps a particular symbol to an integer. (Only really used
+    # for debugging.)
+    symbol_key: dict[str, int]
+    # The start symbol of the grammar.
+    start_symbol: int
+    # The end symbol of the grammar.
+    end_symbol: int
+
     _firsts: FirstInfo
+
     _follows: FollowInfo
 
-    def __init__(self, *args, **kwargs):
-        """See the constructor of GenerateLR0 for an explanation of the
-        parameters to the constructor and what they mean.
-        """
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        start: str,
+        grammar: list[typing.Tuple[str, list[str]]],
+        precedence: None | dict[str, typing.Tuple[Assoc, int]] = None,
+        transparents: None | set[str] = None,
+    ):
+        """Initialize the parser generator with the specified grammar and
+        start symbol.
 
-        # We store the firsts not because we need them here, but because LR1
-        # and Pager need them.
+        The input grammars are of the form:
+
+          grammar_simple = [
+            ('E', ['E', '+', 'T']),
+            ('E', ['T']),
+            ('T', ['(', 'E', ')']),
+            ('T', ['id']),
+          ]
+
+        Which is to say, they are a list of productions. Each production is a
+        tuple where the first element of the tuple is the name of the
+        non-terminal being added, and the second elment of the tuple is the
+        list of terminals and non-terminals that make up the production.
+
+        There is currently no support for custom actions or alternation or
+        anything like that. If you want alternations that you'll have to lower
+        the grammar by hand into the simpler form first.
+
+        Don't name anything with double-underscores; those are reserved for
+        the generator. Don't add '$' either, as it is reserved to mean
+        end-of-stream. Use an empty list to indicate nullability, that is:
+
+          ('O', []),
+
+        means that O can be matched with nothing.
+
+        This isn't a *great* way to author these things, but it is very simple
+        and flexible. You probably don't want to author this on your own; see
+        the Grammar class for a high-level API.
+
+        The precedence dictionary, if provided, maps a given symbol to an
+        associativity and a precedence. Any symbol not in the dictionary is
+        presumed to have an associativity of NONE and a precedence of zero.
+        """
+
+        # Work out the alphabet.
+        alphabet = set()
+        for name, rule in grammar:
+            alphabet.add(name)
+            alphabet.update(symbol for symbol in rule)
+
+        # Check to make sure they didn't use anything that will give us
+        # heartburn later.
+        reserved = [a for a in alphabet if a.startswith("__") or a == "$"]
+        if reserved:
+            raise ValueError(
+                "Can't use {symbols} in grammars, {what} reserved.".format(
+                    symbols=" or ".join(reserved),
+                    what="it's" if len(reserved) == 1 else "they're",
+                )
+            )
+
+        alphabet.add("__start")
+        alphabet.add("$")
+        self.alphabet = list(sorted(alphabet))
+
+        symbol_key = {symbol: index for index, symbol in enumerate(self.alphabet)}
+
+        start_symbol = symbol_key["__start"]
+        end_symbol = symbol_key["$"]
+
+        assert self.alphabet[start_symbol] == "__start"
+        assert self.alphabet[end_symbol] == "$"
+
+        # Turn the incoming grammar into a dictionary, indexed by nonterminal.
+        #
+        # We count on python dictionaries retaining the insertion order, like
+        # it or not.
+        full_grammar: list[list] = [list() for _ in self.alphabet]
+        terminal: list[bool] = [True for _ in self.alphabet]
+        assert terminal[end_symbol]
+
+        nonterminal = [False for _ in self.alphabet]
+
+        for name, rule in grammar:
+            name_symbol = symbol_key[name]
+
+            terminal[name_symbol] = False
+            nonterminal[name_symbol] = True
+
+            rules = full_grammar[name_symbol]
+            rules.append(tuple(symbol_key[symbol] for symbol in rule))
+
+        self.grammar = full_grammar
+        self.grammar[start_symbol].append((symbol_key[start],))
+        terminal[start_symbol] = False
+        nonterminal[start_symbol] = True
+
+        self.terminal = tuple(terminal)
+        self.nonterminal = tuple(nonterminal)
+
+        assert self.terminal[end_symbol]
+        assert self.nonterminal[start_symbol]
+
+        if precedence is None:
+            precedence = {}
+        self.precedence = tuple(precedence.get(a, (Assoc.NONE, 0)) for a in self.alphabet)
+
+        if transparents is None:
+            transparents = set()
+        self.transparents = transparents
+
+        self.symbol_key = symbol_key
+        self.start_symbol = start_symbol
+        self.end_symbol = end_symbol
+
         self._firsts = FirstInfo.from_grammar(self.grammar, self.terminal)
+
         self._follows = FollowInfo.from_grammar(
             self.grammar,
             self.terminal,
@@ -1463,6 +1272,94 @@ class GenerateSLR1(GenerateLR0):
             self.end_symbol,
             self._firsts,
         )
+
+    def gen_closure(self, seeds: typing.Iterable[Configuration]) -> ConfigSet:
+        """Compute the closure for the specified configs. The closure is all
+        of the configurations we could be in. Specifically, if the position
+        for a config is just before a non-terminal then we must also consider
+        configurations where the rule is the rule for the non-terminal and
+        the position is just before the beginning of the rule.
+
+        (We have replaced a recursive version with an iterative one.)
+        """
+        closure: set[Configuration] = set()
+        pending = list(seeds)
+        pending_next = []
+        while len(pending) > 0:
+            for config in pending:
+                if config in closure:
+                    continue
+
+                closure.add(config)
+                pending_next.extend(self.gen_closure_next(config))
+
+            temp = pending
+            pending = pending_next
+            pending_next = temp
+            pending_next.clear()
+
+        # NOTE: The generation of this closure *might* have generated
+        #       multiple cores with different lookaheads; if that's
+        #       the case we need to merge.
+        merged: dict[ConfigurationCore, set[int]] = {}
+        for c in closure:
+            existing = merged.get(c.core)
+            if existing is not None:
+                existing.update(c.lookahead)
+            else:
+                merged[c.core] = set(c.lookahead)
+
+        return ConfigSet(Configuration(k, tuple(sorted(v))) for k, v in merged.items())
+
+    def gen_all_successors(
+        self, config_set: typing.Iterable[Configuration]
+    ) -> list[typing.Tuple[int, ConfigSet]]:
+        """Return all of the non-empty successors for the given config set.
+
+        (That is, given the config set, pretend we see all the symbols we
+        could possibly see, and figure out which configs sets we get from
+        those symbols. Those are the successors of this set.)
+        """
+        possible = {config.core.next for config in config_set if config.core.next is not None}
+
+        next = []
+        for symbol in possible:
+            seeds = ConfigSet(
+                config.replace_position(config.core.position + 1)
+                for config in config_set
+                if config.core.next == symbol
+            )
+            if len(seeds) > 0:
+                next.append((symbol, seeds))
+
+        return next
+
+    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
+        """Generate all configuration sets starting from the provided seeds."""
+        result = ConfigurationSetInfo()
+
+        successors = []
+        pending = [ConfigSet(seeds)]
+        pending_next = []
+        while len(pending) > 0:
+            for core in pending:
+                id, is_new = result.register_core(core)
+                if is_new:
+                    config_set = self.gen_closure(core)
+                    result.register_config_closure(id, config_set)
+                    for symbol, successor in self.gen_all_successors(config_set):
+                        successors.append((id, symbol, successor))
+                        pending_next.append(successor)
+
+            temp = pending
+            pending = pending_next
+            pending_next = temp
+            pending_next.clear()
+
+        for id, symbol, successor in successors:
+            result.add_successor(id, symbol, result.core_key[successor])
+
+        return result
 
     def gen_follow(self, symbol: int) -> set[int]:
         """Generate the follow set for the given nonterminal.
@@ -1475,27 +1372,6 @@ class GenerateSLR1(GenerateLR0):
         See FollowInfo for more information on how this is determined.
         """
         return self._follows.follows[symbol]
-
-    def gen_reduce_set(self, config: Configuration) -> typing.Iterable[int]:
-        """Return the set of symbols that indicate we should reduce the given
-        config.
-
-        In an SLR1 parser, this is the follow set of the config nonterminal.
-        """
-        return self.gen_follow(config.core.name)
-
-
-class GenerateLR1(GenerateSLR1):
-    """Generate parse tables for LR1, or "canonical LR" grammars.
-
-    LR1 parsers can recognize more than SLR parsers. Like SLR parsers, they
-    are choosier about when they reduce. But unlike SLR parsers, they specify
-    the terminals on which they reduce by carrying a 'lookahead' terminal in
-    the configuration. The lookahead of a configuration is computed as the
-    closure of a configuration set is computed, so see gen_closure_next for
-    details. (Except for the start configuration, which has '$' as its
-    lookahead.)
-    """
 
     def gen_first(self, symbols: typing.Iterable[int]) -> typing.Tuple[set[int], bool]:
         """Return the first set for a *sequence* of symbols.
@@ -1551,9 +1427,49 @@ class GenerateLR1(GenerateSLR1):
 
             next = []
             for rule in self.grammar[config_next]:
-                next.append(Configuration.from_rule(config_next, rule, lookahead=lookahead_tuple))
+                rr = Configuration.from_rule(config_next, rule, lookahead=lookahead_tuple)
+                next.append(rr)
 
             return tuple(next)
+
+    def gen_closure_x(self, items: ItemSet) -> ItemSet:
+        closure: dict[ConfigurationCore, set[int]] = {}
+
+        # We're going to maintain a set of things to look at, rules that we
+        # still need to close over. Assume that starts with everything in us.
+        todo = [(core, context) for core, context in items.items.items()]
+        while len(todo) > 0:
+            core, context = todo.pop()
+
+            existing_context = closure.get(core)
+            if existing_context is None or not context <= existing_context:
+                # Either context is none or something in context is not in
+                # existing_context, so we need to process this one.
+                if existing_context is not None:
+                    existing_context.update(context)
+                else:
+                    # NOTE: context in the set is a lookahead and got
+                    #       generated exactly once for all the child rules.
+                    #       we have to copy somewhere, this here seems best.
+                    closure[core] = set(context)
+
+                config_next = core.next
+                if config_next is None:
+                    # No closure for this one, we're at the end.
+                    continue
+
+                rules = self.grammar[config_next]
+                if len(rules) > 0:
+                    lookahead, epsilon = self.gen_first(core.rest)
+                    print(f"    LA {core.rest} -> {lookahead} e:{epsilon}")
+                    if epsilon:
+                        lookahead.update(context)
+
+                    for rule in rules:
+                        new_core = ConfigurationCore.from_rule(config_next, rule)
+                        todo.append((new_core, lookahead))
+
+        return ItemSet(closure)
 
     def gen_all_sets(self):
         """Generate all of the configuration sets for the grammar.
@@ -1566,6 +1482,63 @@ class GenerateLR1(GenerateSLR1):
             for rule in self.grammar[self.start_symbol]
         ]
         return self.gen_sets(seeds)
+
+    def gen_table(self) -> ParseTable:
+        """Generate the parse table.
+
+        The parse table is a list of states. The first state in the list is
+        the starting state. Each state is a dictionary that maps a symbol to an
+        action. Each action is a tuple. The first element of the tuple is a
+        string describing what to do:
+
+        - 'shift': The second element of the tuple is the state
+          number. Consume the input and push that state onto the stack.
+
+        - 'reduce': The second element is the name of the non-terminal being
+          reduced, and the third element is the number of states to remove
+          from the stack. Don't consume the input; just remove the specified
+          number of things from the stack, and then consult the table again,
+          this time using the new top-of-stack as the current state and the
+          name of the non-terminal to find out what to do.
+
+        - 'goto': The second element is the state number to push onto the
+          stack. In the literature, these entries are treated distinctly from
+          the actions, but we mix them here because they never overlap with the
+          other actions. (These are always associated with non-terminals, and
+          the other actions are always associated with terminals.)
+
+        - 'accept': Accept the result of the parse, it worked.
+
+        Anything missing from the row indicates an error.
+        """
+        config_sets = self.gen_all_sets()
+        # print(config_sets.dump_state(self.alphabet))
+        builder = TableBuilder(self.alphabet, self.precedence, self.transparents)
+
+        for config_set_id, config_set in enumerate(config_sets.closures):
+            assert config_set is not None
+            builder.new_row(config_set)
+            successors = config_sets.successors[config_set_id]
+
+            for config in config_set:
+                config_next = config.core.next
+                if config_next is None:
+                    if config.core.name != self.start_symbol:
+                        for a in self.gen_reduce_set(config):
+                            builder.set_table_reduce(a, config)
+                    else:
+                        builder.set_table_accept(self.end_symbol, config)
+
+                elif self.terminal[config_next]:
+                    index = successors[config_next]
+                    builder.set_table_shift(config_next, index, config)
+
+            # Gotos
+            for symbol, index in successors.items():
+                if self.nonterminal[symbol]:
+                    builder.set_table_goto(symbol, index)
+
+        return builder.flush(config_sets)
 
 
 class GeneratePager(GenerateLR1):
@@ -1654,15 +1627,7 @@ class GeneratePager(GenerateLR1):
             todo_off = state_i + 1
             todo -= 1
 
-            # DOTY: TODO: We convert here back and forth to Configuration
-            #       objects, but maybe we can make ItemSet our core
-            #       representation throughout this file. (Even in LR0.) So
-            #       never use Configuration, always ItemSet and ConfigCore.
-            #
-            #       Or just rebuild gen_closure inside ItemSet. shrug
-            temp_set = core_states[state_i].to_config_set()
-            closure = self.gen_closure(temp_set)
-            cl_state = ItemSet.from_config_set(closure)
+            cl_state = self.gen_closure_x(core_states[state_i])
             closed_states[state_i] = cl_state
 
             seen.clear()
@@ -3044,7 +3009,7 @@ class Grammar:
     """
 
     _precedence: dict[str, typing.Tuple[Assoc, int]]
-    _generator: type[GenerateLR0]
+    _generator: type[GenerateLR1]
     _terminals: dict[str, Terminal]
     _nonterminals: dict[str, NonTerminal]
     _trivia: list[Terminal]
@@ -3053,7 +3018,7 @@ class Grammar:
         self,
         start: str | NonTerminal | None = None,
         precedence: PrecedenceList | None = None,
-        generator: type[GenerateLR0] | None = None,
+        generator: type[GenerateLR1] | None = None,
         trivia: list[str | Terminal] | None = None,
         name: str | None = None,
     ):
