@@ -146,7 +146,7 @@ import typing
 #
 # We start with LR0 parsers, because they form the basis of everything else.
 ###############################################################################
-class ConfigurationCore(typing.NamedTuple):
+class Configuration(typing.NamedTuple):
     """A core configuration, basically, a position within a rule.
 
     These need to be as small and as tight as you can make them. They are
@@ -170,7 +170,7 @@ class ConfigurationCore(typing.NamedTuple):
             next = None
         else:
             next = symbols[0]
-        return ConfigurationCore(
+        return Configuration(
             name=name,
             symbols=symbols,
             position=0,
@@ -186,7 +186,7 @@ class ConfigurationCore(typing.NamedTuple):
             next = None
         else:
             next = self.symbols[new_position]
-        return ConfigurationCore(
+        return Configuration(
             name=self.name,
             symbols=self.symbols,
             position=new_position,
@@ -222,57 +222,6 @@ class ConfigurationCore(typing.NamedTuple):
         )
 
 
-class Configuration(typing.NamedTuple):
-    """A rule being tracked in a state. That is, a specific position within a
-    specific rule, with an associated lookahead state.
-
-    (Note: technically, lookahead isn't used until we get to LR(1) parsers,
-    but if left at its default it's harmless. Ignore it until you get to
-    the part about LR(1).)
-    """
-
-    core: ConfigurationCore
-    lookahead: typing.Tuple[int, ...]
-
-    @classmethod
-    def from_rule(cls, name: int, symbols: typing.Tuple[int, ...], lookahead=()):
-        # Consider adding at_end and next to the namedtuple.
-        return Configuration(
-            core=ConfigurationCore.from_rule(name, symbols),
-            lookahead=lookahead,
-        )
-
-    @property
-    def at_end(self) -> bool:
-        return self.core.next is None
-
-    def replace_position(self, new_position):
-        return Configuration(
-            core=self.core.replace_position(new_position),
-            lookahead=self.lookahead,
-        )
-
-    @property
-    def rest(self):
-        return self.core.symbols[(self.core.position + 1) :]
-
-    def __repr__(self) -> str:
-        la = ", " + str(self.lookahead) if self.lookahead != () else ""
-        return f"{repr(self.core)}{la}"
-
-    def format(self, alphabet: list[str]) -> str:
-        if self.lookahead != ():
-            la = " ctx:{" + ",".join(alphabet[i] for i in self.lookahead) + "}"
-        else:
-            la = " ctx:{}"
-
-        return f"{self.core.format(alphabet)}{la}"
-
-
-class ConfigSet(frozenset[Configuration]):
-    pass
-
-
 # Here we have a slightly different definition of a ConfigurationSet; we keep
 # the lookaheads outside and use a dictionary to check for containment
 # quickly. ItemSet is used in the GRM/Pager/Chin algorithm.
@@ -286,14 +235,10 @@ class ItemSet:
     algorithm.
     """
 
-    items: dict[ConfigurationCore, set[int]]
+    items: dict[Configuration, set[int]]
 
     def __init__(self, items=None):
         self.items = items or {}
-
-    @classmethod
-    def from_config_set(cls, config_set: ConfigSet) -> "ItemSet":
-        return ItemSet({config.core: set(config.lookahead) for config in config_set})
 
     def weakly_compatible(self, other: "ItemSet") -> bool:
         a = self.items
@@ -359,11 +304,6 @@ class ItemSet:
                 result.items[next] = set(context)
         return result
 
-    def to_config_set(self) -> ConfigSet:
-        return ConfigSet(
-            {Configuration(core, tuple(sorted(ctx))) for core, ctx in self.items.items()}
-        )
-
 
 @dataclasses.dataclass
 class StateGraph:
@@ -381,7 +321,7 @@ class StateGraph:
     structure, but they all compute this information.)
     """
 
-    closures: list[ConfigSet]
+    closures: list[ItemSet]
 
     # All the sucessors for all of the sets. `successors[i]` is the mapping
     # from grammar symbol to the index of the set you get by processing that
@@ -392,7 +332,7 @@ class StateGraph:
         return json.dumps(
             {
                 str(set_index): {
-                    "closures": [c.format(alphabet) for c in closure],
+                    "closures": [f"{c.format(alphabet)} -> {l}" for c, l in closure.items.items()],
                     "successors": {alphabet[k]: str(v) for k, v in successors.items()},
                 }
                 for set_index, (closure, successors) in enumerate(
@@ -403,14 +343,14 @@ class StateGraph:
             sort_keys=True,
         )
 
-    def find_path_to_set(self, target_set: ConfigSet) -> list[int]:
+    def find_path_to_set(self, target_set: ItemSet) -> list[int]:
         """Trace the path of grammar symbols from the first set (which always
         set 0) to the target set. This is useful in conflict reporting,
-        because we'll be *at* a ConfigSet and want to show the grammar symbols
+        because we'll be *at* an ItemSet and want to show the grammar symbols
         that get us to where we found the conflict.
 
         The return value is a list of grammar symbols to get to the specified
-        ConfigSet.
+        ItemSet.
 
         This function raises KeyError if no path is found.
         """
@@ -518,7 +458,7 @@ class ErrorCollection:
     the error.
     """
 
-    errors: dict[ConfigSet, dict[int, dict[Configuration, Action]]]
+    errors: dict[ItemSet, dict[int, dict[Configuration, Action]]]
 
     def __init__(self):
         self.errors = {}
@@ -529,7 +469,7 @@ class ErrorCollection:
 
     def add_error(
         self,
-        config_set: ConfigSet,
+        config_set: ItemSet,
         symbol: int,
         config: Configuration,
         action: Action,
@@ -581,11 +521,10 @@ class ErrorCollection:
             for symbol, symbol_errors in set_errors.items():
                 actions = []
                 for config, action in symbol_errors.items():
-                    core = config.core
-                    name = alphabet[core.name]
+                    name = alphabet[config.name]
                     rule = " ".join(
-                        f"{'* ' if core.position == i else ''}{alphabet[s]}"
-                        for i, s in enumerate(core.symbols)
+                        f"{'* ' if config.position == i else ''}{alphabet[s]}"
+                        for i, s in enumerate(config.symbols)
                     )
                     if config.at_end:
                         rule += " *"
@@ -707,7 +646,7 @@ class TableBuilder(object):
 
         return ParseTable(actions=self.actions, gotos=self.gotos, trivia=set())
 
-    def new_row(self, config_set: ConfigSet):
+    def new_row(self, config_set: ItemSet):
         """Start a new row, processing the given config set. Call this before
         doing anything else.
         """
@@ -735,9 +674,9 @@ class TableBuilder(object):
         """Mark a reduce of the given configuration for the given symbol in the
         current row.
         """
-        name = self.alphabet[config.core.name]
+        name = self.alphabet[config.name]
         transparent = name in self.transparents
-        action = Reduce(name, len(config.core.symbols), transparent)
+        action = Reduce(name, len(config.symbols), transparent)
         self._set_table_action(symbol, action, config)
 
     def set_table_accept(self, symbol: int, config: Configuration):
@@ -768,7 +707,7 @@ class TableBuilder(object):
         if isinstance(action, Shift):
             return self.precedence[symbol]
         else:
-            return self.precedence[config.core.name]
+            return self.precedence[config.name]
 
     def _set_table_action(self, symbol_id: int, action: ParseAction, config: Configuration | None):
         """Set the action for 'symbol' in the table row to 'action'.
@@ -1252,7 +1191,7 @@ class ParserGenerator:
             self._firsts,
         )
 
-    def gen_sets(self, seeds: list[Configuration]) -> StateGraph:
+    def gen_sets(self, seeds: ItemSet) -> StateGraph:
         # This function can be seen as a modified version of items() from
         # Chen's dissertation.
         #
@@ -1270,10 +1209,7 @@ class ParserGenerator:
         core_states: list[ItemSet] = []
         edges: list[dict[int, int]] = []
 
-        # Convert the incoming seed configurations into item sets.
-        # TODO: Convert everything to ItemSet natively.
-        state0 = ItemSet({seed.core: set(seed.lookahead) for seed in seeds})
-        core_states.append(state0)
+        core_states.append(seeds)
         closed_states.append(None)
         edges.append({})
 
@@ -1399,7 +1335,7 @@ class ParserGenerator:
         # Register all the actually merged, final config sets. I should *not*
         # have to do all this work. Really really garbage.
         return StateGraph(
-            closures=[closed_state.to_config_set() for _, closed_state in gc_states],
+            closures=[closed_state for _, closed_state in gc_states],
             successors=gc_edges,
         )
 
@@ -1492,7 +1428,7 @@ class ParserGenerator:
         set of all those productions combined with all the incoming productions
         is the closure.
         """
-        closure: dict[ConfigurationCore, set[int]] = {}
+        closure: dict[Configuration, set[int]] = {}
 
         # We're going to maintain a set of things to look at, rules that we
         # still need to close over. Assume that starts with everything in us.
@@ -1525,7 +1461,7 @@ class ParserGenerator:
                         lookahead.update(context)
 
                     for rule in rules:
-                        new_core = ConfigurationCore.from_rule(config_next, rule)
+                        new_core = Configuration.from_rule(config_next, rule)
                         todo.append((new_core, lookahead))
 
         return ItemSet(closure)
@@ -1536,10 +1472,12 @@ class ParserGenerator:
         In LR1 parsers, we must remember to set the lookahead of the start
         symbol to '$'.
         """
-        seeds = [
-            Configuration.from_rule(self.start_symbol, rule, lookahead=(self.end_symbol,))
-            for rule in self.grammar[self.start_symbol]
-        ]
+        seeds = ItemSet(
+            {
+                Configuration.from_rule(self.start_symbol, rule): {self.end_symbol}
+                for rule in self.grammar[self.start_symbol]
+            }
+        )
         return self.gen_sets(seeds)
 
     def gen_table(self) -> ParseTable:
@@ -1579,11 +1517,11 @@ class ParserGenerator:
             builder.new_row(config_set)
             successors = config_sets.successors[config_set_id]
 
-            for config in config_set:
-                config_next = config.core.next
+            for config, lookahead in config_set.items.items():
+                config_next = config.next
                 if config_next is None:
-                    if config.core.name != self.start_symbol:
-                        for a in config.lookahead:
+                    if config.name != self.start_symbol:
+                        for a in lookahead:
                             builder.set_table_reduce(a, config)
                     else:
                         builder.set_table_accept(self.end_symbol, config)
