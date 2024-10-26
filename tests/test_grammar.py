@@ -87,8 +87,8 @@ def test_all_generators():
 
     GENERATORS = [
         # parser.GenerateLR0,
-        parser.GeneratePager,
-        parser.GenerateLR1,
+        # parser.GeneratePager,
+        parser.ParserGenerator,
     ]
     for generator in GENERATORS:
         table = G().build_table(generator=generator)
@@ -119,15 +119,14 @@ def test_grammar_aho_ullman_2():
         A = Terminal("a")
         B = Terminal("b")
 
-    TestGrammar().build_table(generator=parser.GenerateLR1)
-    TestGrammar().build_table(generator=parser.GeneratePager)
+    TestGrammar().build_table(generator=parser.ParserGenerator)
+    # TestGrammar().build_table(generator=parser.GeneratePager)
 
 
 def test_fun_lalr():
 
     class TestGrammar(Grammar):
         start = "S"
-        generator = parser.GeneratePager
 
         @rule
         def S(self):
