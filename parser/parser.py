@@ -365,6 +365,7 @@ class ItemSet:
         )
 
 
+@dataclasses.dataclass
 class StateGraph:
     """When we build a grammar into a table, the first thing we need to do is
     generate all the configuration sets and their successors.
@@ -380,65 +381,23 @@ class StateGraph:
     structure, but they all compute this information.)
     """
 
-    core_key: dict[ConfigSet, int]  # Map a ConfigSet into am index
-    config_set_key: dict[ConfigSet, int]  # Map a ConfigSet into am index
-    sets: list[ConfigSet]  # Map the index back into a set
-    closures: list[ConfigSet | None]  # Track closures
+    closures: list[ConfigSet]
 
     # All the sucessors for all of the sets. `successors[i]` is the mapping
     # from grammar symbol to the index of the set you get by processing that
     # symbol.
     successors: list[dict[int, int]]
 
-    def __init__(self):
-        self.core_key = {}
-        self.config_set_key = {}
-        self.sets = []
-        self.closures = []
-        self.successors = []
-
-    def register_core(self, c: ConfigSet) -> typing.Tuple[int, bool]:
-        """Potentially add a new config set to the set of sets. Returns the
-        canonical ID of the set within this structure, along with a boolean
-        indicating whether the set was just added or not.
-
-        (You can use this integer to get the set back, if you need it, and
-        also access the successors table.)
-        """
-        existing = self.core_key.get(c)
-        if existing is not None:
-            return existing, False
-
-        index = len(self.sets)
-        self.sets.append(c)
-        self.closures.append(None)
-        self.successors.append({})
-        self.core_key[c] = index
-        return index, True
-
-    def register_config_closure(self, c_id: int, closure: ConfigSet):
-        assert self.closures[c_id] is None
-        self.closures[c_id] = closure
-        self.config_set_key[closure] = c_id
-
-    def add_successor(self, c_id: int, symbol: int, successor: int):
-        """Register sucessor(`c_id`, `symbol`) -> `successor`, where c_id
-        is the id of the set in this structure, and symbol is the id of a
-        symbol in the alphabet of the grammar.
-        """
-        self.successors[c_id][symbol] = successor
-
     def dump_state(self, alphabet: list[str]) -> str:
         return json.dumps(
             {
                 str(set_index): {
-                    "configs": [c.format(alphabet) for c in config_set],
-                    "closures": [c.format(alphabet) for c in self.closures[set_index] or []],
-                    "successors": {
-                        alphabet[k]: str(v) for k, v in self.successors[set_index].items()
-                    },
+                    "closures": [c.format(alphabet) for c in closure],
+                    "successors": {alphabet[k]: str(v) for k, v in successors.items()},
                 }
-                for set_index, config_set in enumerate(self.sets)
+                for set_index, (closure, successors) in enumerate(
+                    zip(self.closures, self.successors)
+                )
             },
             indent=4,
             sort_keys=True,
@@ -455,7 +414,8 @@ class StateGraph:
 
         This function raises KeyError if no path is found.
         """
-        target_index = self.config_set_key[target_set]
+        # TODO: This should be tested.
+        target_index = self.closures.index(target_set)
         visited = set()
 
         queue: collections.deque = collections.deque()
@@ -1438,14 +1398,10 @@ class ParserGenerator:
 
         # Register all the actually merged, final config sets. I should *not*
         # have to do all this work. Really really garbage.
-        result = StateGraph()
-        result.sets = [core_state.to_config_set() for core_state, _ in gc_states]
-        result.core_key = {s: i for i, s in enumerate(result.sets)}
-        result.closures = [closed_state.to_config_set() for _, closed_state in gc_states]
-        result.config_set_key = {s: i for i, s in enumerate(result.closures) if s is not None}
-        result.successors = gc_edges
-
-        return result
+        return StateGraph(
+            closures=[closed_state.to_config_set() for _, closed_state in gc_states],
+            successors=gc_edges,
+        )
 
     def gc(
         self,
