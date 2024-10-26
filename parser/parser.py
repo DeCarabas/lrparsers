@@ -135,7 +135,6 @@ import bisect
 import collections
 import dataclasses
 import enum
-import functools
 import inspect
 import itertools
 import json
