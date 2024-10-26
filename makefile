@@ -5,3 +5,21 @@
 test:
 	python3 ./parser/parser.py
 	pdm run python3 -m pytest
+
+.PHONY: dep
+dep: lrparser.mk
+
+lrparser.mk: makedep.py pyproject.toml
+	python3 makedep.py
+
+include lrparser.mk
+
+.PHONY: wheel
+wheel: dist/lrparsers-$(VERSION)-py3-none-any.whl
+
+dist/lrparsers-$(VERSION).tar.gz dist/lrparsers-$(VERSION)-py3-none-any.whl: pyproject.toml $(PYTHON_SOURCES)
+	pdm build
+
+.PHONY: clean
+clean:
+	rm -rf ./dist

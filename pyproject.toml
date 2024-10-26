@@ -25,6 +25,19 @@ dev = [
     "hypothesis>=6.111.1",
 ]
 
+[tool.pdm.build]
+includes = [
+   "parser/tree_sitter.py",
+   "parser/runtime.py",
+   "parser/generated_source.py",
+   "parser/parser.py",
+   "parser/emacs.py",
+   "parser/wadler/runtime.py",
+   "parser/wadler/builder.py",
+   "parser/wadler/__init__.py",
+   "parser/__init__.py",
+]
+
 [tool.pyright]
 exclude = ["historical", ".venv"]
 venvPath = "."
