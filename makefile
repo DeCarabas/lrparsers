@@ -23,3 +23,10 @@ dist/lrparsers-$(VERSION).tar.gz dist/lrparsers-$(VERSION)-py3-none-any.whl: pyp
 .PHONY: clean
 clean:
 	rm -rf ./dist
+	rm -rf ./dingus/wheel/*
+
+.PHONY: dingus
+dingus: dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl
+
+dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl: dist/lrparsers-$(VERSION)-py3-none-any.whl
+	cp $< $@
