@@ -365,7 +365,7 @@ class ItemSet:
         )
 
 
-class ConfigurationSetInfo:
+class StateGraph:
     """When we build a grammar into a table, the first thing we need to do is
     generate all the configuration sets and their successors.
 
@@ -598,7 +598,7 @@ class ErrorCollection:
     def gen_exception(
         self,
         alphabet: list[str],
-        all_sets: ConfigurationSetInfo,
+        all_sets: StateGraph,
     ) -> AmbiguityError | None:
         """Format all the errors into an error, or return None if there are no
         errors.
@@ -735,7 +735,7 @@ class TableBuilder(object):
         self.action_row = None
         self.goto_row = None
 
-    def flush(self, all_sets: ConfigurationSetInfo) -> ParseTable:
+    def flush(self, all_sets: StateGraph) -> ParseTable:
         """Finish building the table and return it.
 
         Raises ValueError if there were any conflicts during construction.
@@ -1333,9 +1333,9 @@ class GenerateLR1:
 
         return next
 
-    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
+    def gen_sets(self, seeds: list[Configuration]) -> StateGraph:
         """Generate all configuration sets starting from the provided seeds."""
-        result = ConfigurationSetInfo()
+        result = StateGraph()
 
         successors = []
         pending = [ConfigSet(seeds)]
@@ -1568,7 +1568,7 @@ class GeneratePager(GenerateLR1):
     >         Xin Chen, PhD thesis, University of Hawaii, 2009
     """
 
-    def gen_sets(self, seeds: list[Configuration]) -> ConfigurationSetInfo:
+    def gen_sets(self, seeds: list[Configuration]) -> StateGraph:
         # This function can be seen as a modified version of items() from
         # Chen's dissertation.
         #
@@ -1714,7 +1714,7 @@ class GeneratePager(GenerateLR1):
 
         # Register all the actually merged, final config sets. I should *not*
         # have to do all this work. Really really garbage.
-        result = ConfigurationSetInfo()
+        result = StateGraph()
         result.sets = [core_state.to_config_set() for core_state, _ in gc_states]
         result.core_key = {s: i for i, s in enumerate(result.sets)}
         result.closures = [closed_state.to_config_set() for _, closed_state in gc_states]
