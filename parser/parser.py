@@ -274,6 +274,98 @@ class ConfigSet(frozenset[Configuration]):
     pass
 
 
+# Here we have a slightly different definition of a ConfigurationSet; we keep
+# the lookaheads outside and use a dictionary to check for containment
+# quickly. ItemSet is used in the GRM/Pager/Chin algorithm.
+@dataclasses.dataclass
+class ItemSet:
+    """An ItemSet is a group of configuration cores together with their
+    "contexts", or lookahead sets.
+
+    An ItemSet is comparable for equality, and also supports this lesser notion
+    of "weakly compatible" which is used to collapse states in the pager
+    algorithm.
+    """
+
+    items: dict[ConfigurationCore, set[int]]
+
+    def __init__(self, items=None):
+        self.items = items or {}
+
+    @classmethod
+    def from_config_set(cls, config_set: ConfigSet) -> "ItemSet":
+        return ItemSet({config.core: set(config.lookahead) for config in config_set})
+
+    def weakly_compatible(self, other: "ItemSet") -> bool:
+        a = self.items
+        b = other.items
+
+        if len(a) != len(b):
+            return False
+
+        for acore in a:
+            if acore not in b:
+                return False
+
+        if len(a) == 1:
+            return True
+
+        # DOTY: This loop I do not understand, truly. What the heck is happening here?
+        a_keys = list(a.keys())
+        for i, i_key in enumerate(itertools.islice(a_keys, 0, len(a_keys) - 1)):
+            for j_key in itertools.islice(a_keys, i + 1, None):
+                a_i_key = a[i_key]
+                b_i_key = b[i_key]
+                a_j_key = a[j_key]
+                b_j_key = b[j_key]
+
+                # DOTY: GRMTools written with intersects(); we don't have that we have
+                #       `not disjoint()`. :P There are many double negatives....
+                #
+                #  not (intersect(a_i, b_j) or intersect(a_j, b_i))
+                #  not ((not disjoint(a_i, b_j)) or (not disjoint(a_j, b_i)))
+                #  ((not not disjoint(a_i, b_j)) and (not not disjoint(a_j, b_i)))
+                #  disjoint(a_i, b_j) and disjoint(a_j, b_i)
+                if a_i_key.isdisjoint(b_j_key) and a_j_key.isdisjoint(b_i_key):
+                    continue
+
+                # intersect(a_i, a_j) or intersect(b_i, b_j)
+                # (not disjoint(a_i, a_j)) or (not disjoint(b_i, b_j))
+                # not (disjoint(a_i, a_j) and disjoint(b_i, b_j))
+                if not (a_i_key.isdisjoint(a_j_key) and b_i_key.isdisjoint(b_j_key)):
+                    continue
+
+                return False
+
+        return True
+
+    def weakly_merge(self, other: "ItemSet") -> bool:
+        """Merge b into a, returning True if this lead to any changes."""
+        a = self.items
+        b = other.items
+
+        changed = False
+        for a_key, a_ctx in a.items():
+            start_len = len(a_ctx)
+            a_ctx.update(b[a_key])  # Python doesn't tell us changes
+            changed = changed or (start_len != len(a_ctx))
+
+        return changed
+
+    def goto(self, symbol: int) -> "ItemSet":
+        result = ItemSet()
+        for core, context in self.items.items():
+            if core.next == symbol:
+                next = core.replace_position(core.position + 1)
+                result.items[next] = set(context)
+        return result
+
+    def to_config_set(self) -> ConfigSet:
+        return ConfigSet(
+            {Configuration(core, tuple(sorted(ctx))) for core, ctx in self.items.items()}
+        )
+
+
 class ConfigurationSetInfo:
     """When we build a grammar into a table, the first thing we need to do is
     generate all the configuration sets and their successors.
@@ -1005,98 +1097,6 @@ class FollowInfo:
                         prev_symbol = symbol
 
         return FollowInfo(follows=follows)
-
-
-# Here we have a slightly different definition of a ConfigurationSet; we keep the
-# lookaheads outside and use a dictionary to check for containment quickly.
-# ItemSet is used in the GRM/Pager/Chin algorithm.
-@dataclasses.dataclass
-class ItemSet:
-    """An ItemSet is a group of configuration cores together with their
-    "contexts", or lookahead sets.
-
-    An ItemSet is comparable for equality, and also supports this lesser notion
-    of "weakly compatible" which is used to collapse states in the pager
-    algorithm.
-    """
-
-    items: dict[ConfigurationCore, set[int]]
-
-    def __init__(self, items=None):
-        self.items = items or {}
-
-    @classmethod
-    def from_config_set(cls, config_set: ConfigSet) -> "ItemSet":
-        return ItemSet({config.core: set(config.lookahead) for config in config_set})
-
-    def weakly_compatible(self, other: "ItemSet") -> bool:
-        a = self.items
-        b = other.items
-
-        if len(a) != len(b):
-            return False
-
-        for acore in a:
-            if acore not in b:
-                return False
-
-        if len(a) == 1:
-            return True
-
-        # DOTY: This loop I do not understand, truly. What the heck is happening here?
-        a_keys = list(a.keys())
-        for i, i_key in enumerate(itertools.islice(a_keys, 0, len(a_keys) - 1)):
-            for j_key in itertools.islice(a_keys, i + 1, None):
-                a_i_key = a[i_key]
-                b_i_key = b[i_key]
-                a_j_key = a[j_key]
-                b_j_key = b[j_key]
-
-                # DOTY: GRMTools written with intersects(); we don't have that we have
-                #       `not disjoint()`. :P There are many double negatives....
-                #
-                #  not (intersect(a_i, b_j) or intersect(a_j, b_i))
-                #  not ((not disjoint(a_i, b_j)) or (not disjoint(a_j, b_i)))
-                #  ((not not disjoint(a_i, b_j)) and (not not disjoint(a_j, b_i)))
-                #  disjoint(a_i, b_j) and disjoint(a_j, b_i)
-                if a_i_key.isdisjoint(b_j_key) and a_j_key.isdisjoint(b_i_key):
-                    continue
-
-                # intersect(a_i, a_j) or intersect(b_i, b_j)
-                # (not disjoint(a_i, a_j)) or (not disjoint(b_i, b_j))
-                # not (disjoint(a_i, a_j) and disjoint(b_i, b_j))
-                if not (a_i_key.isdisjoint(a_j_key) and b_i_key.isdisjoint(b_j_key)):
-                    continue
-
-                return False
-
-        return True
-
-    def weakly_merge(self, other: "ItemSet") -> bool:
-        """Merge b into a, returning True if this lead to any changes."""
-        a = self.items
-        b = other.items
-
-        changed = False
-        for a_key, a_ctx in a.items():
-            start_len = len(a_ctx)
-            a_ctx.update(b[a_key])  # Python doesn't tell us changes
-            changed = changed or (start_len != len(a_ctx))
-
-        return changed
-
-    def goto(self, symbol: int) -> "ItemSet":
-        result = ItemSet()
-        for core, context in self.items.items():
-            if core.next == symbol:
-                next = core.replace_position(core.position + 1)
-                result.items[next] = set(context)
-        return result
-
-    def to_config_set(self) -> ConfigSet:
-        return ConfigSet(
-            {Configuration(core, tuple(sorted(ctx))) for core, ctx in self.items.items()}
-        )
 
 
 class GenerateLR1:
