@@ -142,9 +142,7 @@ import typing
 
 
 ###############################################################################
-# LR0
-#
-# We start with LR0 parsers, because they form the basis of everything else.
+# Parser Generator
 ###############################################################################
 class Configuration(typing.NamedTuple):
     """A core configuration, basically, a position within a rule.
@@ -1218,11 +1216,8 @@ class ParserGenerator:
         # token more than once.
         seen: set[int] = set()
 
-        # cnd_[rule|token]_weaklies represent which states are possible weakly
-        # compatible matches for a given symbol.
-        #
-        # DOTY: As with `seen`, we have a uniform space so we can have a
-        #       uniform one of these too.
+        # cnd_weaklies represent which states are possible weakly compatible
+        # matches for a given symbol.
         cnd_weaklies: list[list[int]] = [[] for _ in range(len(self.alphabet))]
 
         todo = 1  # How many None values are there in closed_states?

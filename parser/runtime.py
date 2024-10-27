@@ -113,6 +113,13 @@ class RepairStack(typing.NamedTuple):
     def handle_token(
         self, table: parser.ParseTable, token: str
     ) -> typing.Tuple["RepairStack | None", bool]:
+        """Pretend we received this token during a repair.
+
+        This is *incredibly* annoying: basically another implementation of the
+        shift/reduce machine. We need to do this in order to simulate the effect
+        of receiving a token of the given type, so that we know what state the
+        world will be in if we (hypothetically) take a given action.
+        """
         rl = recover_log
 
         stack = self
@@ -179,7 +186,8 @@ class Repair:
         table: parser.ParseTable,
         input: list[TokenValue],
         start: int,
-    ):
+    ) -> typing.Iterable["Repair"]:
+        """Generate all the possible next repairs from this one."""
         input_index = start + self.advance
         current_token = input[input_index].kind
 
@@ -191,6 +199,11 @@ class Repair:
 
         state = self.stack.state
 
+        # First, generate all the neighbors that involve either consuming the
+        # current token or generating a new one and consuming *that.* For each
+        # case, we need to run the shift-reduce machine to figure out what the
+        # new state will be after consuming the token.
+        #
         # For insert: go through all the actions and run all the possible
         # reduce/accepts on them. This will generate a *new stack* which we
         # then capture with an "Insert" repair action. Do not manipuate the
@@ -254,6 +267,11 @@ class Repair:
 
 
 def recover(table: parser.ParseTable, input: list[TokenValue], start: int, stack: ParseStack):
+    """An implementation of CPCT+ for automated error recovery.
+
+    Given a current parse state, attempt to produce a series of modifications to
+    the token stream such that the parse will continue successfully.
+    """
     rl = recover_log
     initial = Repair(
         repair=RepairAction.Base,
@@ -270,11 +288,16 @@ def recover(table: parser.ParseTable, input: list[TokenValue], start: int, stack
         while queue_index < len(queue):
             repair = queue[queue_index]
 
-            # NOTE: This is guaranteed to be the cheapest possible success-
-            #       there can be no success cheaper than this one. Since
-            #       we're going to pick one arbitrarily, this one might as
-            #       well be it.
             if repair.success:
+                # If the repair at the top of the queue indicates success, then
+                # we will just take it. This is guaranteed to be one of the
+                # cheapest repairs because we know that every repair on this level
+                # of the queue has the same cost and every every repair on a
+                # subsequent level has a *higher* cost.
+                #
+                # (The CPCT+ paper gathers all repairs and asks the user to choose,
+                # but I want fully automated recovery so I'll be picking arbitrarily,
+                # and, well, picking *this* one meets the definition of arbitrary.)
                 repairs: list[Repair] = []
                 while repair is not None:
                     repairs.append(repair)
@@ -286,6 +309,11 @@ def recover(table: parser.ParseTable, input: list[TokenValue], start: int, stack
                         rl.info(" " + repr(repair))
                 return repairs
 
+            # NOTE: a neighbor can be on the same queue level! As a result, we
+            #       must use this index + append scheme, and we must not "scan
+            #       for successes and then generate neighbors" because
+            #       generating neighbors might actually generate a success on
+            #       the current level.
             for neighbor in repair.neighbors(table, input, start):
                 for _ in range((neighbor.cost - len(todo_queue)) + 1):
                     todo_queue.append([])
@@ -309,6 +337,55 @@ class TokenStream(typing.Protocol):
         ...
 
 
+def prepare_tokens(
+    input_tokens: list[typing.Tuple[parser.Terminal, int, int]],
+    trivia_tokens: set[str],
+) -> list[TokenValue]:
+    """Filter the list of input tokens into a list of non-trivia tokens, with
+    associated trivia lists. Also, stick an EOF on the end of the token list
+    to make *sure* the input is terminated.
+    """
+    input: list[TokenValue] = []
+    trivia: list[TokenValue] = []
+    for kind, start, length in input_tokens:
+        assert kind.name is not None
+        if kind.name in trivia_tokens:
+            trivia.append(
+                TokenValue(
+                    kind=kind.name,
+                    start=start,
+                    end=start + length,
+                    pre_trivia=[],
+                    post_trivia=[],
+                )
+            )
+        else:
+            prev_trivia = trivia
+            trivia = []
+
+            input.append(
+                TokenValue(
+                    kind=kind.name,
+                    start=start,
+                    end=start + length,
+                    pre_trivia=prev_trivia,
+                    post_trivia=trivia,
+                )
+            )
+
+    eof = 0 if len(input) == 0 else input[-1].end
+    input.append(
+        TokenValue(
+            kind="$",
+            start=eof,
+            end=eof,
+            pre_trivia=trivia,
+            post_trivia=[],
+        )
+    )
+    return input
+
+
 class Parser:
     table: parser.ParseTable
 
@@ -316,50 +393,16 @@ class Parser:
         self.table = table
 
     def parse(self, tokens: TokenStream) -> typing.Tuple[Tree | None, list[str]]:
-        input_tokens = tokens.tokens()
+        """Parse a token stream into a tree, returning both the root of the tree
+        (if any could be found) and a list of errors that were encountered during
+        the parse.
 
-        # Filter the input tokens, to generate a list of non-trivia tokens.
-        # In addition, track the trivia tokens we find along the way, and put
-        # them into a list attached to each non-trivia token, so we can
-        # actually recover the document *as written*.
-        input: list[TokenValue] = []
-        trivia: list[TokenValue] = []
-        for kind, start, length in input_tokens:
-            assert kind.name is not None
-            if kind.name in self.table.trivia:
-                trivia.append(
-                    TokenValue(
-                        kind=kind.name,
-                        start=start,
-                        end=start + length,
-                        pre_trivia=[],
-                        post_trivia=[],
-                    )
-                )
-            else:
-                prev_trivia = trivia
-                trivia = []
-
-                input.append(
-                    TokenValue(
-                        kind=kind.name,
-                        start=start,
-                        end=start + length,
-                        pre_trivia=prev_trivia,
-                        post_trivia=trivia,
-                    )
-                )
-
-        eof = 0 if len(input) == 0 else input[-1].end
-        input = input + [
-            TokenValue(
-                kind="$",
-                start=eof,
-                end=eof,
-                pre_trivia=trivia,
-                post_trivia=[],
-            )
-        ]
+        This parse method does automated error recovery. Tree nodes that were
+        generated as a result of error recovery will be noticeable because they
+        will be zero characters wide.
+        """
+        # Prepare the incoming token stream into only meaningful tokens.
+        input = prepare_tokens(tokens.tokens(), self.table.trivia)
         input_index = 0
 
         # Our stack is a stack of tuples, where the first entry is the state
@@ -386,12 +429,15 @@ class Parser:
 
             match action:
                 case parser.Accept():
+                    # We are at the end of the parse and we're done.
                     r = stack[-1][1]
                     assert isinstance(r, Tree)
                     result = r
                     break
 
                 case parser.Reduce(name=name, count=size, transparent=transparent):
+                    # Reduce a nonterminal: consume children from the stack, and
+                    # make a new tree node, then jump to the next state.
                     children: list[TokenValue | Tree] = []
                     if size > 0:
                         for _, c in stack[-size:]:
@@ -421,10 +467,13 @@ class Parser:
                     stack.append((goto, value))
 
                 case parser.Shift():
+                    # Consume a token.
                     stack.append((action.state, current_token))
                     input_index += 1
 
                 case parser.Error():
+                    # Oh no, something went wrong! Record the error then
+                    # attempt to repair the token sequence.
                     if current_token.kind == "$":
                         message = "Syntax error: Unexpected end of file"
                     else:
@@ -438,18 +487,22 @@ class Parser:
                         )
                     )
 
+                    # See if we can find a series of patches to the token stream
+                    # that will allow us to continue parsing.
                     repairs = recover(self.table, input, input_index, stack)
 
                     # If we were unable to find a repair sequence, then just
-                    # quit here; we have what we have. We *should* do our
-                    # best to generate a tree, but I'm not sure if we can?
+                    # quit here: we didn't manage to even make a tree. It would
+                    # be nice if we could create a tree in this case but I'm not
+                    # entirely sure how to do it.
                     if repairs is None:
                         break
 
                     # If we were *were* able to find a repair, apply it to
-                    # the token stream and continue moving. It is guaranteed
-                    # that we will not generate an error until we get to the
-                    # end of the stream that we found.
+                    # the token stream. The repair is a series of insertions,
+                    # deletions, and consumptions of tokens in the stream. We
+                    # patch up the token stream inline with the repaired changes
+                    # so that now we have a valid token stream again.
                     cursor = input_index
                     for repair in repairs:
                         match repair.repair:
@@ -485,6 +538,10 @@ class Parser:
                             case _:
                                 typing.assert_never(repair.repair)
 
+                    # Now we can just keep running: don't change state or
+                    # position in the token stream or anything, the stream is
+                    # now good enough for us to keep parsing for a while.
+
                 case _:
                     typing.assert_never(action)
 
@@ -515,8 +572,6 @@ def generic_tokenize(
     last_accept = None
     last_accept_pos = 0
 
-    # print(f"LEXING: {src} ({len(src)})")
-
     while pos < len(src):
         while state is not None:
             accept, edges = table[state]
@@ -524,31 +579,24 @@ def generic_tokenize(
                 last_accept = accept
                 last_accept_pos = pos
 
-            # print(f"    @ {pos} state: {state} ({accept})")
             if pos >= len(src):
                 break
 
             char = ord(src[pos])
-            # print(f"      -> char: {char} ({repr(src[pos])})")
 
             # Find the index of the span where the upper value is the tightest
             # bound on the character.
             state = None
             index = bisect.bisect_right(edges, char, key=lambda x: x[0].upper)
-            # print(f"      -> {index}")
             if index < len(edges):
                 span, target = edges[index]
-                # print(f"      -> {span}, {target}")
                 if char >= span.lower:
-                    # print(f"         -> target: {target}")
                     state = target
                     pos += 1
 
                 else:
-                    # print(f"         Nope (outside range)")
                     pass
             else:
-                # print(f"       Nope (at end)")
                 pass
 
         if last_accept is None:
@@ -556,7 +604,6 @@ def generic_tokenize(
 
         yield (last_accept, start, last_accept_pos - start)
 
-        # print(f"    Yield: {last_accept}, reset to {last_accept_pos}")
         last_accept = None
         pos = last_accept_pos
         start = pos
