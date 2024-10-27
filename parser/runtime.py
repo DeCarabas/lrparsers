@@ -112,32 +112,38 @@ class RepairStack(typing.NamedTuple):
 
     def handle_token(
         self, table: parser.ParseTable, token: str
-    ) -> typing.Tuple["RepairStack | None", bool]:
+    ) -> typing.Tuple["RepairStack | None", bool, list[str]]:
         """Pretend we received this token during a repair.
 
         This is *incredibly* annoying: basically another implementation of the
         shift/reduce machine. We need to do this in order to simulate the effect
         of receiving a token of the given type, so that we know what state the
         world will be in if we (hypothetically) take a given action.
+
+        Returns the new stack, a boolean indicating whether or not this marks
+        a successful parse, and a list of reductions we made.
         """
         rl = recover_log
 
+        reductions = []
         stack = self
         while True:
             action = table.actions[stack.state].get(token)
             if action is None:
-                return None, False
+                return None, False, reductions
 
             match action:
                 case parser.Shift():
                     rl.debug(f"{stack.state}: SHIFT -> {action.state}")
-                    return stack.push(action.state), False
+                    return stack.push(action.state), False, reductions
 
                 case parser.Accept():
                     rl.debug(f"{stack.state}: ACCEPT")
-                    return stack, True  # ?
+                    return stack, True, reductions  # ?
 
                 case parser.Reduce():
+                    if not action.transparent:
+                        reductions.append(action.name)
                     rl.debug(f"{stack.state}: REDUCE {action.name} {action.count} ")
                     new_stack = stack.pop(action.count)
                     rl.debug(f"               -> {new_stack.state}")
@@ -160,8 +166,11 @@ class Repair:
     parent: "Repair | None"
     shifts: int
     success: bool
+    reductions: list[str]
 
-    def __init__(self, repair, cost, stack, parent, advance=0, value=None, success=False):
+    def __init__(
+        self, repair, cost, stack, parent, advance=0, value=None, success=False, reductions=[]
+    ):
         self.repair = repair
         self.cost = cost
         self.stack = stack
@@ -169,6 +178,7 @@ class Repair:
         self.value = value
         self.success = success
         self.advance = advance
+        self.reductions = reductions
 
         if parent is not None:
             self.cost += parent.cost
@@ -215,7 +225,7 @@ class Repair:
         # number of successful shifts.
         for token in table.actions[state].keys():
             rl.debug(f"  token: {token}")
-            new_stack, success = self.stack.handle_token(table, token)
+            new_stack, success, reductions = self.stack.handle_token(table, token)
             if new_stack is None:
                 # Not clear why this is necessary, but I think state merging
                 # causes us to occasionally have reduce actions that lead to
@@ -234,6 +244,7 @@ class Repair:
                     cost=0,  # Shifts are free.
                     advance=1,  # Move forward by one.
                     success=success,
+                    reductions=reductions,
                 )
 
             # Never generate an insert for EOF, that might cause us to cut
@@ -247,6 +258,7 @@ class Repair:
                     stack=new_stack,
                     cost=1,  # TODO: Configurable token costs
                     success=success,
+                    reductions=reductions,
                 )
 
         # For delete: produce a repair that just advances the input token
@@ -472,20 +484,12 @@ class Parser:
                     input_index += 1
 
                 case parser.Error():
-                    # Oh no, something went wrong! Record the error then
-                    # attempt to repair the token sequence.
+                    # We can't make a better error message here.
                     if current_token.kind == "$":
-                        message = "Syntax error: Unexpected end of file"
+                        error_message = "end of file"
                     else:
-                        message = f"Syntax error: unexpected symbol {current_token.kind}"
-
-                    errors.append(
-                        ParseError(
-                            message=message,
-                            start=current_token.start,
-                            end=current_token.end,
-                        )
-                    )
+                        error_message = f"{current_token.kind}"
+                    error_message = "Syntax Error: Unexpected " + error_message
 
                     # See if we can find a series of patches to the token stream
                     # that will allow us to continue parsing.
@@ -494,17 +498,37 @@ class Parser:
                     # If we were unable to find a repair sequence, then just
                     # quit here: we didn't manage to even make a tree. It would
                     # be nice if we could create a tree in this case but I'm not
-                    # entirely sure how to do it.
+                    # entirely sure how to do it. We also record an extremely
+                    # basic error message: without a repair sequence it's hard
+                    # to know what we were trying to do.
                     if repairs is None:
+                        errors.append(
+                            ParseError(
+                                message=error_message,
+                                start=current_token.start,
+                                end=current_token.end,
+                            )
+                        )
                         break
 
                     # If we were *were* able to find a repair, apply it to
                     # the token stream. The repair is a series of insertions,
                     # deletions, and consumptions of tokens in the stream. We
-                    # patch up the token stream inline with the repaired changes
-                    # so that now we have a valid token stream again.
+                    # patch up the token stream inline with the repaired
+                    # changes so that now we have a valid token stream again.
                     cursor = input_index
+
+                    # Also, use the series of repairs to guide our error
+                    # message: the repairs are our guess about what we were
+                    # in the middle of when things went wrong.
+                    token_message = None
+                    production_message = None
                     for repair in repairs:
+                        # See if we can figure out what we were working on here,
+                        # for the error message.
+                        if production_message is None and len(repair.reductions) > 0:
+                            production_message = f"while parsing {repair.reductions[0]}"
+
                         match repair.repair:
                             case RepairAction.Base:
                                 # Don't need to do anything here, this is
@@ -528,6 +552,9 @@ class Parser:
                                 )
                                 cursor += 1
 
+                                if token_message is None:
+                                    token_message = f"Expected {repair.value}"
+
                             case RepairAction.Delete:
                                 del input[cursor]
 
@@ -537,6 +564,20 @@ class Parser:
 
                             case _:
                                 typing.assert_never(repair.repair)
+
+                    # Add the extra information about what we were looking for
+                    # here.
+                    if token_message is not None:
+                        error_message = f"{error_message}. {token_message}"
+                    if production_message is not None:
+                        error_message = f"{error_message} {production_message}"
+                    errors.append(
+                        ParseError(
+                            message=error_message,
+                            start=current_token.start,
+                            end=current_token.end,
+                        )
+                    )
 
                     # Now we can just keep running: don't change state or
                     # position in the token stream or anything, the stream is

@@ -298,6 +298,7 @@ fn f() {
 
 fn g() {}
 """
+    # TODO: Error reporting here is wild.
     tree, errors = runtime.parse(L_PARSE_TABLE, L_LEXER_TABLE, text)
     assert len(errors) > 0, "We ought to have caught at least one error"
     assert tree is not None, "Gee we ought to have had *something* from this parse"
@@ -359,6 +360,7 @@ fn f() {
   let y = 2
 }
 """
+    # TODO: Error reporting here is weird.
     tree, errors = runtime.parse(L_PARSE_TABLE, L_LEXER_TABLE, text)
     assert len(errors) > 0, "We ought to have caught at least one error"
     assert tree is not None, "Gee we ought to have had *something* from this parse"
