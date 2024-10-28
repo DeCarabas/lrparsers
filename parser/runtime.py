@@ -404,6 +404,9 @@ class Parser:
     def __init__(self, table: parser.ParseTable):
         self.table = table
 
+    def readable(self, token_kind: str) -> str:
+        return self.table.error_names.get(token_kind, token_kind)
+
     def parse(self, tokens: TokenStream) -> typing.Tuple[Tree | None, list[str]]:
         """Parse a token stream into a tree, returning both the root of the tree
         (if any could be found) and a list of errors that were encountered during
@@ -527,7 +530,8 @@ class Parser:
                         # See if we can figure out what we were working on here,
                         # for the error message.
                         if production_message is None and len(repair.reductions) > 0:
-                            production_message = f"while parsing {repair.reductions[-1]}"
+                            reduction = repair.reductions[-1]
+                            production_message = f"while parsing {self.readable(reduction)}"
 
                         match repair.repair:
                             case RepairAction.Base:
@@ -553,7 +557,9 @@ class Parser:
                                 cursor += 1
 
                                 if token_message is None:
-                                    token_message = f"(Did you forget {repair.value}?)"
+                                    token_message = (
+                                        f"(Did you forget {self.readable(repair.value)}?)"
+                                    )
 
                             case RepairAction.Delete:
                                 del input[cursor]

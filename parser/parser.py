@@ -552,8 +552,9 @@ class ParseTable:
     actions: list[dict[str, ParseAction]]
     gotos: list[dict[str, int]]
     trivia: set[str]
+    error_names: dict[str, str]
 
-    def format(self):
+    def format(self) -> str:
         """Format a parser table so pretty."""
 
         def format_action(actions: dict[str, ParseAction], terminal: str):
@@ -642,7 +643,7 @@ class TableBuilder(object):
         if error is not None:
             raise error
 
-        return ParseTable(actions=self.actions, gotos=self.gotos, trivia=set())
+        return ParseTable(actions=self.actions, gotos=self.gotos, trivia=set(), error_names={})
 
     def new_row(self, config_set: ItemSet):
         """Start a new row, processing the given config set. Call this before
@@ -1582,12 +1583,21 @@ class Terminal(Rule):
     pattern: "str | Re"
     meta: dict[str, typing.Any]
     regex: bool
+    error_name: str | None
 
-    def __init__(self, pattern: "str|Re", *, name: str | None = None, **kwargs):
+    def __init__(
+        self,
+        pattern: "str|Re",
+        *,
+        name: str | None = None,
+        error_name: str | None = None,
+        **kwargs,
+    ):
         self.name = name
         self.pattern = pattern
         self.meta = kwargs
         self.regex = isinstance(pattern, Re)
+        self.error_name = error_name
 
     def flatten(
         self, with_metadata: bool = False
@@ -1611,12 +1621,14 @@ class NonTerminal(Rule):
     fn: typing.Callable[["Grammar"], Rule]
     name: str
     transparent: bool
+    error_name: str | None
 
     def __init__(
         self,
         fn: typing.Callable[["Grammar"], Rule],
         name: str | None = None,
         transparent: bool = False,
+        error_name: str | None = None,
     ):
         """Create a new NonTerminal.
 
@@ -1624,10 +1636,16 @@ class NonTerminal(Rule):
         right-hand-side of this production; it will be flattened with `flatten`.
         `name` is the name of the production- if unspecified (or `None`) it will
         be replaced with the `__name__` of the provided fn.
+
+        error_name is a human-readable name, to be shown in error messages. Use
+        this to fine-tune error messages. (For example, maybe you want your
+        nonterminal to be named "expr" but in error messages it should be
+        be spelled out: "expression".)
         """
         self.fn = fn
         self.name = name or fn.__name__
         self.transparent = transparent
+        self.error_name = error_name
 
     def generate_body(self, grammar) -> list[list[str | Terminal]]:
         """Generate the body of the non-terminal.
@@ -1763,12 +1781,16 @@ def rule(f: typing.Callable, /) -> Rule: ...
 
 @typing.overload
 def rule(
-    name: str | None = None, transparent: bool | None = None
+    name: str | None = None,
+    transparent: bool | None = None,
+    error_name: str | None = None,
 ) -> typing.Callable[[typing.Callable[[typing.Any], Rule]], Rule]: ...
 
 
 def rule(
-    name: str | None | typing.Callable = None, transparent: bool | None = None
+    name: str | None | typing.Callable = None,
+    transparent: bool | None = None,
+    error_name: str | None = None,
 ) -> Rule | typing.Callable[[typing.Callable[[typing.Any], Rule]], Rule]:
     """The decorator that marks a method in a Grammar object as a nonterminal
     rule.
@@ -1783,6 +1805,7 @@ def rule(
     def wrapper(f: typing.Callable[[typing.Any], Rule]):
         nonlocal name
         nonlocal transparent
+        nonlocal error_name
 
         if name is None:
             name = f.__name__
@@ -1791,7 +1814,7 @@ def rule(
         if transparent is None:
             transparent = name.startswith("_")
 
-        return NonTerminal(f, name, transparent)
+        return NonTerminal(f, name, transparent, error_name)
 
     return wrapper
 
@@ -2968,6 +2991,17 @@ class Grammar:
         for t in self._trivia:
             assert t.name is not None
             table.trivia.add(t.name)
+
+        for nt in self._nonterminals.values():
+            if nt.error_name is not None:
+                table.error_names[nt.name] = nt.error_name
+
+        for t in self._terminals.values():
+            if t.name is not None:
+                if t.error_name is not None:
+                    table.error_names[t.name] = t.error_name
+                elif isinstance(t.pattern, str):
+                    table.error_names[t.name] = f'"{t.pattern}"'
 
         return table
 
