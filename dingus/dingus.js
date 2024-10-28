@@ -88,7 +88,7 @@ function render_state(state, input_editor) {
   }
 
   if (state.output_mode === "errors") {
-    const error_node = document.createElement("pre");
+    const error_node = document.createElement("div");
     error_node.classList.add("error-panel");
     if (state.errors.length == 0) {
       if (state.tree) {
@@ -97,7 +97,13 @@ function render_state(state, input_editor) {
         error_node.innerText = "No errors.";
       }
     } else {
-      error_node.innerText = state.errors.join("\n");
+      const ul = document.createElement("ul");
+      ul.replaceChildren(...state.errors.map(e => {
+        const li = document.createElement("li");
+        li.innerText = e;
+        return li;
+      }));
+      error_node.appendChild(ul);
     }
 
     OUTPUT.replaceChildren(error_node);
