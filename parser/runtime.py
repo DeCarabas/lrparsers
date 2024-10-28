@@ -527,7 +527,7 @@ class Parser:
                         # See if we can figure out what we were working on here,
                         # for the error message.
                         if production_message is None and len(repair.reductions) > 0:
-                            production_message = f"while parsing {repair.reductions[0]}"
+                            production_message = f"while parsing {repair.reductions[-1]}"
 
                         match repair.repair:
                             case RepairAction.Base:
@@ -553,7 +553,7 @@ class Parser:
                                 cursor += 1
 
                                 if token_message is None:
-                                    token_message = f"Expected {repair.value}"
+                                    token_message = f"(Did you forget {repair.value}?)"
 
                             case RepairAction.Delete:
                                 del input[cursor]
@@ -567,10 +567,10 @@ class Parser:
 
                     # Add the extra information about what we were looking for
                     # here.
-                    if token_message is not None:
-                        error_message = f"{error_message}. {token_message}"
                     if production_message is not None:
                         error_message = f"{error_message} {production_message}"
+                    if token_message is not None:
+                        error_message = f"{error_message}. {token_message}"
                     errors.append(
                         ParseError(
                             message=error_message,
