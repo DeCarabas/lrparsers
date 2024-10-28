@@ -27,6 +27,7 @@ clean:
 
 .PHONY: dingus
 dingus: dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl
+	python3 ./dingus/srvit.py
 
 dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl: dist/lrparsers-$(VERSION)-py3-none-any.whl
 	cp $< $@

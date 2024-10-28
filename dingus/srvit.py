@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import os
+import pathlib
+import socket
 
 from http.server import test, SimpleHTTPRequestHandler, ThreadingHTTPServer
 
@@ -36,27 +37,16 @@ if __name__ == "__main__":
         help="bind to this address " "(default: all interfaces)",
     )
     parser.add_argument(
-        "-d",
-        "--directory",
-        default=os.getcwd(),
-        help="serve this directory " "(default: current directory)",
-    )
-    parser.add_argument(
-        "-p",
-        "--protocol",
-        metavar="VERSION",
-        default="HTTP/1.0",
-        help="conform to this HTTP version " "(default: %(default)s)",
-    )
-    parser.add_argument(
         "port",
-        default=8000,
+        default=8086,
         type=int,
         nargs="?",
         help="bind to this port " "(default: %(default)s)",
     )
     args = parser.parse_args()
     handler_class = MyHTTPRequestHandler
+
+    directory = pathlib.Path(__file__).parent
 
     # ensure dual-stack is not disabled; ref #38907
     class DualStackServer(ThreadingHTTPServer):
@@ -68,12 +58,12 @@ if __name__ == "__main__":
             return super().server_bind()
 
         def finish_request(self, request, client_address):
-            self.RequestHandlerClass(request, client_address, self, directory=args.directory)
+            self.RequestHandlerClass(request, client_address, self, directory=str(directory))
 
     test(
         HandlerClass=handler_class,
         ServerClass=DualStackServer,
         port=args.port,
         bind=args.bind,
-        protocol=args.protocol,
+        protocol="HTTP/1.0",
     )
