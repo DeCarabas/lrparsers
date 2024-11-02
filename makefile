@@ -23,18 +23,42 @@ dist/lrparsers-$(VERSION).tar.gz dist/lrparsers-$(VERSION)-py3-none-any.whl: pyp
 .PHONY: clean
 clean:
 	rm -rf ./dist
-	rm -rf ./dingus/wheel/*
-	rm ./dingus/about.html
 
-# TODO: Get the built dingus artifacts out of the tree :P
-#       Use hard-links to make editing pleasant.
+DINGUS_FILES=\
+	dingus/srvit.py \
+	dingus/index.html \
+	dingus/dingus.js \
+	dingus/worker.js \
+	dingus/style.css \
+	dingus/codemirror/codemirror.css \
+	dingus/codemirror/codemirror.js \
+	dingus/codemirror/python.js \
+	dingus/pyodide/micropip-0.6.0-py3-none-any.whl \
+	dingus/pyodide/micropip-0.6.0-py3-none-any.whl.metadata \
+	dingus/pyodide/packaging-23.2-py3-none-any.whl \
+	dingus/pyodide/packaging-23.2-py3-none-any.whl.metadata \
+	dingus/pyodide/pyodide.asm.js \
+	dingus/pyodide/pyodide.asm.wasm \
+	dingus/pyodide/pyodide-core-0.26.2.tar \
+	dingus/pyodide/pyodide.d.ts \
+	dingus/pyodide/pyodide.js \
+	dingus/pyodide/pyodide-lock.json \
+	dingus/pyodide/pyodide.mjs \
+	dingus/pyodide/python_stdlib.zip \
+
+DINGUS_TARGETS=$(addprefix dist/, $(DINGUS_FILES))
 
 .PHONY: dingus
-dingus: dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl dingus/about.html
-	python3 ./dingus/srvit.py
+dingus: $(DINGUS_TARGETS) dist/dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl dist/dingus/about.html
+	python3 ./dist/dingus/srvit.py
 
-dingus/about.html: dingus/about.md
+dist/dingus/%: dingus/%
+	mkdir -p $(dir $@)
+	ln $< $@
+
+dist/dingus/about.html: dingus/about.md
 	pandoc $< -o $@ -s
 
-dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl: dist/lrparsers-$(VERSION)-py3-none-any.whl
+dist/dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl: dist/lrparsers-$(VERSION)-py3-none-any.whl
+	mkdir -p $(dir $@)
 	cp $< $@
