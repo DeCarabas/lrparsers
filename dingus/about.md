@@ -1,7 +1,7 @@
 % About The Grammar Dingus
 <!-- Lots of this writing is taken from the project readme, so keep them in sync. -->
 
-(This is a demo)[index.html] for a (library)[https://github.com/decarabas/lrparsers]
+[This is a demo](index.html) for a [library](https://github.com/decarabas/lrparsers)
 about doing fun things with grammars.
 
 ## How to Use The Dingus
