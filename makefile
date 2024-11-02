@@ -24,10 +24,17 @@ dist/lrparsers-$(VERSION).tar.gz dist/lrparsers-$(VERSION)-py3-none-any.whl: pyp
 clean:
 	rm -rf ./dist
 	rm -rf ./dingus/wheel/*
+	rm ./dingus/about.html
+
+# TODO: Get the built dingus artifacts out of the tree :P
+#       Use hard-links to make editing pleasant.
 
 .PHONY: dingus
-dingus: dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl
+dingus: dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl dingus/about.html
 	python3 ./dingus/srvit.py
+
+dingus/about.html: dingus/about.md
+	pandoc $< -o $@ -s
 
 dingus/wheel/lrparsers-$(VERSION)-py3-none-any.whl: dist/lrparsers-$(VERSION)-py3-none-any.whl
 	cp $< $@
