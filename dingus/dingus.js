@@ -3,6 +3,8 @@ const OUTPUT = document.getElementById("output-root");
 const TREE_BUTTON = document.getElementById("tree-button");
 const ERRORS_BUTTON = document.getElementById("errors-button");
 
+const EXAMPLE_SELECT = document.getElementById("example-select");
+
 const INITIAL_STATE = {
   worker: null,
   status: "Initializing...",
@@ -301,6 +303,302 @@ function setup_editors() {
 
   TREE_BUTTON.onclick = () => handler({kind: "tree_button"});
   ERRORS_BUTTON.onclick = () => handler({kind: "errors_button"});
+
+  for (const example of EXAMPLES) {
+    const opt = document.createElement("option");
+    opt.value = example.id;
+    opt.text = example.name;
+    EXAMPLE_SELECT.add(opt, null);
+  }
+
+  EXAMPLE_SELECT.onchange = () => {
+    if (EXAMPLE_SELECT.selectedIndex > 0) {
+      const index = EXAMPLE_SELECT.selectedIndex - 1;
+      const example = EXAMPLES[index];
+
+      if (window.confirm("If you continue, any changes in the window will be lost. OK?")) {
+        grammar_editor.doc.setValue(example.grammar.trim());
+        input_editor.doc.setValue(example.input.trim());
+      }
+
+      EXAMPLE_SELECT.selectedIndex = 0;
+    }
+  };
 }
+
+const EXAMPLES = [
+  {
+    "id": "sql",
+    "name": "SQL (well, sorta)",
+    "grammar": `
+# A silly little SQL grammar. Incomplete, but you get it, right?
+from parser import *
+
+class SQLGrammar(Grammar):
+    start = "query"
+    trivia = ["BLANKS"]
+
+    precedence = [
+    ]
+
+    @rule
+    def query(self):
+        return self.select_clause + opt(self.from_clause)
+
+    @rule
+    def select_clause(self):
+        return self.SELECT + self.select_column_list
+
+    @rule(transparent=True)
+    def select_column_list(self):
+        return alt(
+          self.column_spec,
+          self.select_column_list + self.COMMA + self.column_spec,
+        )
+
+    @rule
+    def column_spec(self):
+        return alt(
+          self.STAR,
+          self.expression + opt(self.alias),
+        )
+
+    @rule
+    def alias(self):
+      return self.AS + self.NAME
+
+    @rule
+    def from_clause(self):
+      return self.FROM + self.table_list
+
+    @rule(transparent=True)
+    def table_list(self):
+      return (
+        self.table_clause |
+        (self.table_list + self.COMMA + self.table_clause)
+      )
+
+    @rule
+    def table_clause(self):
+      return alt(
+        self.table_expression + opt(self.alias),
+        self.join_clause,
+      )
+
+    @rule
+    def table_expression(self):
+      return alt(
+        self.NAME,
+        self.LPAREN + self.query + self.RPAREN,
+      )
+
+    @rule
+    def join_clause(self):
+      return self.join_type + self.table_expression + self.ON + self.expression
+
+    @rule
+    def join_type(self):
+      return opt(alt(
+        opt(alt(self.LEFT, self.RIGHT)) + self.OUTER,
+        self.INNER,
+        self.CROSS,
+      )) + self.JOIN
+
+    @rule
+    def expression(self):
+        return self.NAME
+
+    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+
+    # TODO: Case insensitivity? I don't know if I care- this grammar
+    #       tool is more about new languages than parsing existing ones,
+    #       and this SQL grammar is just a demo. Do people want case
+    #       ignoring lexers?
+    SELECT = Terminal("select")
+    AS = Terminal("as")
+    COMMA = Terminal(",")
+    STAR = Terminal("*")
+    FROM = Terminal("from")
+    WHERE = Terminal("where")
+    LPAREN = Terminal("(")
+    RPAREN = Terminal(")")
+
+    LEFT = Terminal("left")
+    RIGHT = Terminal("right")
+    OUTER = Terminal("outer")
+    INNER = Terminal("inner")
+    CROSS = Terminal("cross")
+    JOIN = Terminal("join")
+    ON = Terminal("on")
+
+    NAME = Terminal(
+        Re.seq(
+            Re.set(("a", "z"), ("A", "Z"), "_"),
+            Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
+        ),
+    )
+`,
+    "input": `
+select
+    *,
+    mumble as grumble,
+    humble
+from
+    bumble as stumble,
+    (select asdf) as y,
+    left outer join foo on asdf
+`
+  },
+  {
+    "id": "matklad",
+    "name": "L (a resilient parsing example)",
+    "grammar": `
+# A grammar based on
+# https://matklad.github.io/2023/05/21/resilient-ll-parsing-tutorial.html
+from parser import *
+
+class LGrammar(Grammar):
+    start = "File"
+    trivia = ["BLANKS"]
+
+    # Need a little bit of disambiguation for the symbol involved.
+    precedence = [
+        (Assoc.LEFT, ["PLUS", "MINUS"]),
+        (Assoc.LEFT, ["STAR", "SLASH"]),
+        (Assoc.LEFT, ["LPAREN"]),
+    ]
+
+    @rule
+    def File(self):
+        # TODO: Make lists easier
+        return self._functions
+
+    @rule
+    def _functions(self):
+        return self.Function | (self._functions + self.Function)
+
+    @rule
+    def Function(self):
+        return self.FN + self.NAME + self.ParamList + opt(self.ARROW + self.TypeExpr) + self.Block
+
+    @rule
+    def ParamList(self):
+        return self.LPAREN + opt(self._parameters) + self.RPAREN
+
+    @rule
+    def _parameters(self):
+        # NOTE: The ungrammar in the reference does not talk about commas required between parameters
+        #       so this massages it to make them required. Commas are in the list not the param, which
+        #       is more awkward for processing but not terminally so.
+        return (self.Param + opt(self.COMMA)) | (self.Param + self.COMMA + self._parameters)
+
+    @rule
+    def Param(self):
+        return self.NAME + self.COLON + self.TypeExpr
+
+    @rule
+    def TypeExpr(self):
+        return self.NAME
+
+    @rule
+    def Block(self):
+        return self.LCURLY + opt(self._statements) + self.RCURLY
+
+    @rule
+    def _statements(self):
+        return self.Stmt | self._statements + self.Stmt
+
+    @rule
+    def Stmt(self):
+        return self.StmtExpr | self.StmtLet | self.StmtReturn
+
+    @rule
+    def StmtExpr(self):
+        return self.Expr + self.SEMICOLON
+
+    @rule
+    def StmtLet(self):
+        return self.LET + self.NAME + self.EQUAL + self.Expr + self.SEMICOLON
+
+    @rule
+    def StmtReturn(self):
+        return self.RETURN + self.Expr + self.SEMICOLON
+
+    @rule(error_name="expression")
+    def Expr(self):
+        return self.ExprLiteral | self.ExprName | self.ExprParen | self.ExprBinary | self.ExprCall
+
+    @rule
+    def ExprLiteral(self):
+        return self.INT | self.TRUE | self.FALSE
+
+    @rule
+    def ExprName(self):
+        return self.NAME
+
+    @rule
+    def ExprParen(self):
+        return self.LPAREN + self.Expr + self.RPAREN
+
+    @rule
+    def ExprBinary(self):
+        return self.Expr + (self.PLUS | self.MINUS | self.STAR | self.SLASH) + self.Expr
+
+    @rule
+    def ExprCall(self):
+        return self.Expr + self.ArgList
+
+    @rule
+    def ArgList(self):
+        return self.LPAREN + opt(self._arg_star) + self.RPAREN
+
+    @rule
+    def _arg_star(self):
+        # Again, a deviation from the original. See _parameters.
+        return (self.Expr + opt(self.COMMA)) | (self.Expr + self.COMMA + self._arg_star)
+
+    BLANKS = Terminal(Re.set(" ", "\\t", "\\r", "\\n").plus())
+
+    TRUE = Terminal("true")
+    FALSE = Terminal("false")
+    INT = Terminal(Re.set(("0", "9")).plus())
+    FN = Terminal("fn")
+    ARROW = Terminal("->")
+    COMMA = Terminal(",")
+    LPAREN = Terminal("(")
+    RPAREN = Terminal(")")
+    LCURLY = Terminal("{")
+    RCURLY = Terminal("}")
+    COLON = Terminal(":")
+    SEMICOLON = Terminal(";")
+    LET = Terminal("let")
+    EQUAL = Terminal("=")
+    RETURN = Terminal("return")
+    PLUS = Terminal("+")
+    MINUS = Terminal("-")
+    STAR = Terminal("*")
+    SLASH = Terminal("/")
+
+    NAME = Terminal(
+        Re.seq(
+            Re.set(("a", "z"), ("A", "Z"), "_"),
+            Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
+        ),
+    )
+`,
+    "input": `
+fn dingus(x:f64, y:f64) -> f64 {
+  return 23;
+}
+
+fn what() {
+}
+
+fn something() {
+  return 123 * 12;
+}
+`,
+  },
+]
 
 setup_editors();
