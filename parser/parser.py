@@ -1452,7 +1452,6 @@ class ParserGenerator:
                 rules = self.grammar[config_next]
                 if len(rules) > 0:
                     lookahead, epsilon = self.gen_first(core.rest)
-                    print(f"    LA {core.rest} -> {lookahead} e:{epsilon}")
                     if epsilon:
                         lookahead.update(context)
 
