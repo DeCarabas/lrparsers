@@ -2,6 +2,7 @@ from parser import *
 
 
 NAME = Terminal(
+    "NAME",
     Re.seq(
         Re.set(("a", "z"), ("A", "Z"), "_"),
         Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
@@ -9,6 +10,7 @@ NAME = Terminal(
 )
 
 STRING = Terminal(
+    "STRING",
     Re.seq(
         Re.literal("'"),
         (~Re.set("'", "\\") | (Re.set("\\") + Re.any())).star(),
@@ -18,6 +20,7 @@ STRING = Terminal(
 )
 
 NUMBER = Terminal(
+    "NUMBER",
     Re.seq(
         Re.set(("0", "9")).plus(),
         Re.seq(
@@ -33,118 +36,118 @@ NUMBER = Terminal(
     highlight=highlight.constant.numeric,
 )
 
-OR = Terminal("or")
-AND = Terminal("and")
-NOT = Terminal("not")
+OR = Terminal("OR", "or")
+AND = Terminal("AND", "and")
+NOT = Terminal("NOT", "not")
 COMPARISON = Terminal(
+    "COMPARISON",
     Re.literal("=")
     | Re.literal("<>")
     | Re.literal("<")
     | Re.literal(">")
     | Re.literal("<=")
-    | Re.literal(">=")
+    | Re.literal(">="),
 )
-PLUS = Terminal("+")
-MINUS = Terminal("-")
-STAR = Terminal("*")
-SLASH = Terminal("/")
+PLUS = Terminal("PLUS", "+")
+MINUS = Terminal("MINUS", "-")
+STAR = Terminal("STAR", "*")
+SLASH = Terminal("SLASH", "/")
 
-precedence = [
-    (Assoc.LEFT, ["OR"]),
-    (Assoc.LEFT, ["AND"]),
-    (Assoc.LEFT, ["NOT"]),
-    (Assoc.LEFT, ["COMPARISON"]),
-    (Assoc.LEFT, ["PLUS", "MINUS"]),
-    (Assoc.LEFT, ["STAR", "SLASH"]),
-    # TODO: Unary minus
-]
+ALL = Terminal("ALL", "all")
+AMMSC = Terminal("AMMSC", "ammsc")
+ANY = Terminal("ANY", "any")
+AS = Terminal("AS", "as")
+ASC = Terminal("ASC", "asc")
+AUTHORIZATION = Terminal("AUTHORIZATION", "authorization")
+BETWEEN = Terminal("BETWEEN", "between")
+BY = Terminal("BY", "by")
+CHARACTER = Terminal("CHARACTER", "character")
+CHECK = Terminal("CHECK", "check")
+CLOSE = Terminal("CLOSE", "close")
+COMMIT = Terminal("COMMIT", "commit")
+CONTINUE = Terminal("CONTINUE", "continue")
+CREATE = Terminal("CREATE", "create")
+CURRENT = Terminal("CURRENT", "current")
+CURSOR = Terminal("CURSOR", "cursor")
+DECIMAL = Terminal("DECIMAL", "decimal")
+DECLARE = Terminal("DECLARE", "declare")
+DEFAULT = Terminal("DEFAULT", "default")
+DELETE = Terminal("DELETE", "delete")
+DESC = Terminal("DESC", "desc")
+DISTINCT = Terminal("DISTINCT", "distinct")
+DOUBLE = Terminal("DOUBLE", "double")
+ESCAPE = Terminal("ESCAPE", "escape")
+EXISTS = Terminal("EXISTS", "exists")
+FETCH = Terminal("FETCH", "fetch")
+FLOAT = Terminal("FLOAT", "float")
+FOR = Terminal("FOR", "for")
+FOREIGN = Terminal("FOREIGN", "foreign")
+FOUND = Terminal("FOUND", "found")
+FROM = Terminal("FROM", "from")
+GOTO = Terminal("GOTO", "goto")
+GRANT = Terminal("GRANT", "grant")
+GROUP = Terminal("GROUP", "group")
+HAVING = Terminal("HAVING", "having")
+IN = Terminal("IN", "in")
+INDICATOR = Terminal("INDICATOR", "indicator")
+INSERT = Terminal("INSERT", "insert")
+INTEGER = Terminal("INTEGER", "integer")
+INTO = Terminal("INTO", "into")
+IS = Terminal("IS", "is")
+KEY = Terminal("KEY", "key")
+LANGUAGE = Terminal("LANGUAGE", "language")
+LIKE = Terminal("LIKE", "like")
+NULL = Terminal("NULL", "null")
+NUMERIC = Terminal("NUMERIC", "numeric")
+OF = Terminal("OF", "of")
+ON = Terminal("ON", "on")
+OPEN = Terminal("OPEN", "open")
+OPTION = Terminal("OPTION", "option")
+ORDER = Terminal("ORDER", "order")
+PARAMETER = Terminal("PARAMETER", "parameter")
+PRECISION = Terminal("PRECISION", "precision")
+PRIMARY = Terminal("PRIMARY", "primary")
+PRIVILEGES = Terminal("PRIVILEGES", "privileges")
+PROCEDURE = Terminal("PROCEDURE", "procedure")
+PUBLIC = Terminal("PUBLIC", "public")
+REAL = Terminal("REAL", "real")
+REFERENCES = Terminal("REFERENCES", "references")
+ROLLBACK = Terminal("ROLLBACK", "rollback")
+SCHEMA = Terminal("SCHEMA", "schema")
+SELECT = Terminal("SELECT", "select")
+SET = Terminal("SET", "set")
+SMALLINT = Terminal("SMALLINT", "smallint")
+SOME = Terminal("SOME", "some")
+SQLCODE = Terminal("SQLCODE", "sqlcode")
+SQLERROR = Terminal("SQLERROR", "sqlerror")
+TABLE = Terminal("TABLE", "table")
+TO = Terminal("TO", "to")
+UNION = Terminal("UNION", "union")
+UNIQUE = Terminal("UNIQUE", "unique")
+UPDATE = Terminal("UPDATE", "update")
+USER = Terminal("USER", "user")
+VALUES = Terminal("VALUES", "values")
+VIEW = Terminal("VIEW", "view")
+WHENEVER = Terminal("WHENEVER", "whenever")
+WHERE = Terminal("WHERE", "where")
+WITH = Terminal("WITH", "with")
+WORK = Terminal("WORK", "work")
 
-ALL = Terminal("all")
-AMMSC = Terminal("ammsc")
-ANY = Terminal("any")
-ASC = Terminal("asc")
-AUTHORIZATION = Terminal("authorization")
-BETWEEN = Terminal("between")
-BY = Terminal("by")
-CHARACTER = Terminal("character")
-CHECK = Terminal("check")
-CLOSE = Terminal("close")
-COMMIT = Terminal("commit")
-CONTINUE = Terminal("continue")
-CREATE = Terminal("create")
-CURRENT = Terminal("current")
-CURSOR = Terminal("cursor")
-DECIMAL = Terminal("decimal")
-DECLARE = Terminal("declare")
-DEFAULT = Terminal("default")
-DELETE = Terminal("delete")
-DESC = Terminal("desc")
-DISTINCT = Terminal("distinct")
-DOUBLE = Terminal("double")
-ESCAPE = Terminal("escape")
-EXISTS = Terminal("exists")
-FETCH = Terminal("fetch")
-FLOAT = Terminal("float")
-FOR = Terminal("for")
-FOREIGN = Terminal("foreign")
-FOUND = Terminal("found")
-FROM = Terminal("from")
-GOTO = Terminal("goto")
-GRANT = Terminal("grant")
-GROUP = Terminal("group")
-HAVING = Terminal("having")
-IN = Terminal("in")
-INDICATOR = Terminal("indicator")
-INSERT = Terminal("insert")
-INTEGER = Terminal("integer")
-INTO = Terminal("into")
-IS = Terminal("is")
-KEY = Terminal("key")
-LANGUAGE = Terminal("language")
-LIKE = Terminal("like")
-NULL = Terminal("null")
-NUMERIC = Terminal("numeric")
-OF = Terminal("of")
-ON = Terminal("on")
-OPEN = Terminal("open")
-OPTION = Terminal("option")
-ORDER = Terminal("order")
-PARAMETER = Terminal("parameter")
-PRECISION = Terminal("precision")
-PRIMARY = Terminal("primary")
-PRIVILEGES = Terminal("privileges")
-PROCEDURE = Terminal("procedure")
-PUBLIC = Terminal("public")
-REAL = Terminal("real")
-REFERENCES = Terminal("references")
-ROLLBACK = Terminal("rollback")
-SCHEMA = Terminal("schema")
-SELECT = Terminal("select")
-SET = Terminal("set")
-SMALLINT = Terminal("smallint")
-SOME = Terminal("some")
-SQLCODE = Terminal("sqlcode")
-SQLERROR = Terminal("sqlerror")
-TABLE = Terminal("table")
-TO = Terminal("to")
-UNION = Terminal("union")
-UNIQUE = Terminal("unique")
-UPDATE = Terminal("update")
-USER = Terminal("user")
-VALUES = Terminal("values")
-VIEW = Terminal("view")
-WHENEVER = Terminal("whenever")
-WHERE = Terminal("where")
-WITH = Terminal("with")
-WORK = Terminal("work")
+SEMICOLON = Terminal("SEMICOLON", ";")
+LPAREN = Terminal("LPAREN", "(")
+RPAREN = Terminal("RPAREN", ")")
+COMMA = Terminal("COMMA", ",")
+EQUAL = Terminal("EQUAL", "=")
+DOT = Terminal("DOT", ".")
 
-SEMICOLON = Terminal(";")
-LPAREN = Terminal("(")
-RPAREN = Terminal(")")
-COMMA = Terminal(",")
-EQUAL = Terminal("=")
-DOT = Terminal(".")
-AS = Terminal("as")
+BLANKS = Terminal("BLANKS", Re.set(" ", "\t").plus())
+LINE_BREAK = Terminal("LINE_BREAK", Re.set("\r", "\n"), trivia_mode=TriviaMode.NewLine)
+COMMENT = Terminal(
+    "COMMENT",
+    Re.seq(Re.literal("--"), Re.set("\n").invert().star()),
+    highlight=highlight.comment.line,
+    trivia_mode=TriviaMode.LineComment,
+)
 
 
 @rule
@@ -740,3 +743,19 @@ def user():
 @rule
 def when_action():
     return (GOTO + NAME) | CONTINUE
+
+
+SQL = Grammar(
+    start=sql_list,
+    precedence=[
+        (Assoc.LEFT, [OR]),
+        (Assoc.LEFT, [AND]),
+        (Assoc.LEFT, [NOT]),
+        (Assoc.LEFT, [COMPARISON]),
+        (Assoc.LEFT, [PLUS, MINUS]),
+        (Assoc.LEFT, [STAR, SLASH]),
+        # TODO: Unary minus
+    ],
+    trivia=[BLANKS, COMMENT, LINE_BREAK],
+    name="SQL",
+)

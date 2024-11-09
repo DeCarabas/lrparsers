@@ -79,11 +79,7 @@ class MatcherTable:
     newline_replace: dict[str, str]
 
 
-def _compile_nonterminal_matcher(
-    grammar: parser.Grammar,
-    nonterminals: dict[str, parser.NonTerminal],
-    rule: parser.NonTerminal,
-) -> MatcherTable:
+def _compile_nonterminal_matcher(rule: parser.NonTerminal) -> MatcherTable:
     """Generate a matcher table for a single nonterminal.
 
     See the docs for [MatcherTable] to understand the result.
@@ -111,7 +107,7 @@ def _compile_nonterminal_matcher(
     def compile_nonterminal(name: str, rule: parser.NonTerminal):
         if name not in visited:
             visited.add(name)
-            for production in rule.fn(grammar).flatten(with_metadata=True):
+            for production in rule.fn().flatten(with_metadata=True):
                 trans_prod = compile_production(production)
                 generated_grammar.append((name, trans_prod))
 
@@ -126,19 +122,18 @@ def _compile_nonterminal_matcher(
 
         result = []
         for item in production:
-            if isinstance(item, str):
-                nt = nonterminals[item]
-                if nt.transparent:
+            if isinstance(item, parser.NonTerminal):
+                if item.transparent:
                     # If it's transparent then we make a new set of
                     # productions that covers the contents of the
                     # transparent nonterminal.
-                    name = "xxx_" + nt.name
-                    compile_nonterminal(name, nt)
+                    name = "xxx_" + item.name
+                    compile_nonterminal(name, item)
                     result.append(name)
                 else:
                     # Otherwise it's a "token" in our input, named
                     # "tree_{whatever}".
-                    result.append(f"tree_{item}")
+                    result.append(f"tree_{item.name}")
 
             elif isinstance(item, parser.Terminal):
                 # If it's a terminal it will appear in our input as
@@ -257,7 +252,7 @@ def _compile_nonterminal_matcher(
 
     start_name = f"yyy_{rule.name}"
     compile_nonterminal(start_name, rule)
-    gen = grammar._generator(start_name, generated_grammar)
+    gen = parser.ParserGenerator(start_name, generated_grammar)
     parse_table = gen.gen_table()
 
     for (_, replacement), rule_name in newlines.items():
@@ -296,7 +291,7 @@ def compile_pretty_table(grammar: parser.Grammar, indent: str | None = None) -> 
     matchers = {}
 
     if indent is None:
-        indent = getattr(grammar, "pretty_indent", None)
+        indent = grammar.pretty_indent
     if indent is None:
         indent = " "
 
@@ -307,7 +302,7 @@ def compile_pretty_table(grammar: parser.Grammar, indent: str | None = None) -> 
             trivia_mode[t.name] = mode
 
     for name, rule in nonterminals.items():
-        matchers[name] = _compile_nonterminal_matcher(grammar, nonterminals, rule)
+        matchers[name] = _compile_nonterminal_matcher(rule)
 
     return PrettyTable(
         indent,

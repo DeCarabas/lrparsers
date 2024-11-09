@@ -25,8 +25,6 @@ class FaceQuery:
 
 
 def gather_faces(grammar: parser.Grammar):
-    nts = {nt.name: nt for nt in grammar.non_terminals()}
-
     def scoop(node: str, input: parser.FlattenedWithMetadata, visited: set[str]) -> list[FaceQuery]:
         parts = []
         for item in input:
@@ -52,13 +50,12 @@ def gather_faces(grammar: parser.Grammar):
                             )
                         )
 
-            elif isinstance(item, str):
-                nt = nts[item]
-                if nt.transparent:
-                    if nt.name in visited:
+            elif isinstance(item, parser.NonTerminal):
+                if item.transparent:
+                    if item.name in visited:
                         continue
-                    visited.add(nt.name)
-                    body = nt.fn(grammar)
+                    visited.add(item.name)
+                    body = item.definition
                     for production in body.flatten(with_metadata=True):
                         parts.extend(scoop(node, production, visited))
 
@@ -69,7 +66,7 @@ def gather_faces(grammar: parser.Grammar):
         if rule.transparent:
             continue
 
-        body = rule.fn(grammar)
+        body = rule.definition
         for production in body.flatten(with_metadata=True):
             queries.extend(scoop(rule.name, production, set()))
 

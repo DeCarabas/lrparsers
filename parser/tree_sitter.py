@@ -263,8 +263,7 @@ def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
             if rule.transparent:
                 rule_name = "_" + rule_name
 
-            body = rule.fn(grammar)
-            rule_definition = convert_to_tree_sitter(body, grammar)
+            rule_definition = convert_to_tree_sitter(rule.definition, grammar)
             if rule_definition is None:
                 raise Exception(f"Tree-sitter does not support the empty rule {rule_name}")
             rule_definition = apply_precedence(rule_definition, rule.name, grammar)
@@ -283,7 +282,6 @@ def emit_tree_sitter_grammar(grammar: parser.Grammar, path: pathlib.Path | str):
 
 
 def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
-    nts = {nt.name: nt for nt in grammar.non_terminals()}
     scope_suffix = "." + grammar.name
 
     def scoop(input: parser.FlattenedWithMetadata, visited: set[str]) -> list[str]:
@@ -300,13 +298,12 @@ def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
                         raise Exception("Highlight must come with a field name")  # TODO
                     parts.append(f"{field_name}: _ @{highlight.scope}{scope_suffix}")
 
-            elif isinstance(item, str):
-                nt = nts[item]
-                if nt.transparent:
-                    if nt.name in visited:
+            elif isinstance(item, parser.NonTerminal):
+                if item.transparent:
+                    if item.name in visited:
                         continue
-                    visited.add(nt.name)
-                    body = nt.fn(grammar)
+                    visited.add(item.name)
+                    body = item.definition
                     for production in body.flatten(with_metadata=True):
                         parts.extend(scoop(production, visited))
 
@@ -317,7 +314,7 @@ def emit_tree_sitter_queries(grammar: parser.Grammar, path: pathlib.Path | str):
         if rule.transparent:
             continue
 
-        body = rule.fn(grammar)
+        body = rule.definition
         patterns = set()
         for production in body.flatten(with_metadata=True):
             # Scoop up the meta...

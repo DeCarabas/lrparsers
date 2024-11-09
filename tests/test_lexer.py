@@ -354,32 +354,33 @@ def test_edge_list_always_sorted(points: list[tuple[int, int]]):
 
 
 def test_lexer_compile():
-    class LexTest(Grammar):
-        @rule
-        def foo(self):
-            return self.IS
+    @rule
+    def foo():
+        # NOTE: This is a hack to ensure the terminals are reachable. :P
+        return IS | AS | IDENTIFIER
 
-        start = "foo"
-
-        IS = Terminal("is")
-        AS = Terminal("as")
-        IDENTIFIER = Terminal(
-            Re.seq(
-                Re.set(("a", "z"), ("A", "Z"), "_"),
-                Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
-            )
+    IS = Terminal("IS", "is")
+    AS = Terminal("AS", "as")
+    IDENTIFIER = Terminal(
+        "IDENTIFIER",
+        Re.seq(
+            Re.set(("a", "z"), ("A", "Z"), "_"),
+            Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
         )
-        BLANKS = Terminal(Re.set("\r", "\n", "\t", " ").plus())
+    )
+    BLANKS = Terminal("BLANKS", Re.set("\r", "\n", "\t", " ").plus())
 
-    lexer = LexTest().compile_lexer()
+
+    LexTest = Grammar(start=foo, trivia=[BLANKS])
+    lexer = LexTest.compile_lexer()
     dump_lexer_table(lexer)
     tokens = list(generic_tokenize("xy is ass", lexer))
     assert tokens == [
-        (LexTest.IDENTIFIER, 0, 2),
-        (LexTest.BLANKS, 2, 1),
-        (LexTest.IS, 3, 2),
-        (LexTest.BLANKS, 5, 1),
-        (LexTest.IDENTIFIER, 6, 3),
+        (IDENTIFIER, 0, 2),
+        (BLANKS, 2, 1),
+        (IS, 3, 2),
+        (BLANKS, 5, 1),
+        (IDENTIFIER, 6, 3),
     ]
 
 
@@ -387,34 +388,35 @@ def test_lexer_compile():
 def test_lexer_numbers(n: float):
     assume(math.isfinite(n))
 
-    class LexTest(Grammar):
-        @rule
-        def number(self):
-            return self.NUMBER
+    @rule
+    def number():
+        return NUMBER
 
-        start = "number"
-
-        NUMBER = Terminal(
+    NUMBER = Terminal(
+        "NUMBER",
+        Re.seq(
+            Re.set(("0", "9")).plus(),
             Re.seq(
+                Re.literal("."),
                 Re.set(("0", "9")).plus(),
-                Re.seq(
-                    Re.literal("."),
-                    Re.set(("0", "9")).plus(),
-                ).question(),
-                Re.seq(
-                    Re.set("e", "E"),
-                    Re.set("+", "-").question(),
-                    Re.set(("0", "9")).plus(),
-                ).question(),
-            )
+            ).question(),
+            Re.seq(
+                Re.set("e", "E"),
+                Re.set("+", "-").question(),
+                Re.set(("0", "9")).plus(),
+            ).question(),
         )
+    )
 
-    lexer = LexTest().compile_lexer()
+
+    LexTest = Grammar(start=number)
+
+    lexer = LexTest.compile_lexer()
     dump_lexer_table(lexer)
 
     number_string = str(n)
 
     tokens = list(generic_tokenize(number_string, lexer))
     assert tokens == [
-        (LexTest.NUMBER, 0, len(number_string)),
+        (NUMBER, 0, len(number_string)),
     ]

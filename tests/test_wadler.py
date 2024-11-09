@@ -23,69 +23,66 @@ import parser.wadler.builder as builder
 import parser.wadler.runtime as runtime
 
 
-class JsonGrammar(Grammar):
-    start = "root"
-
-    trivia = ["BLANKS"]
-
+def make_json_grammar():
     @rule
-    def root(self):
-        return self.value
+    def root():
+        return value
 
     @rule(transparent=True)
-    def value(self):
+    def value():
         return (
-            self.object
-            | self.array
-            | self.NUMBER
-            | self.TRUE
-            | self.FALSE
-            | self.NULL
-            | self.STRING
+            object
+            | array
+            | NUMBER
+            | TRUE
+            | FALSE
+            | NULL
+            | STRING
         )
 
     @rule
-    def object(self):
+    def object():
         return group(
-            self.LCURLY + opt(indent(newline() + self._object_pairs)) + newline() + self.RCURLY
+            LCURLY + opt(indent(newline() + _object_pairs)) + newline() + RCURLY
         )
 
     @rule
-    def _object_pairs(self):
+    def _object_pairs():
         return alt(
-            self.object_pair,
-            self.object_pair + self.COMMA + newline(" ") + self._object_pairs,
+            object_pair,
+            object_pair + COMMA + newline(" ") + _object_pairs,
         )
 
     @rule
-    def object_pair(self):
-        return group(self.STRING + self.COLON + indent(newline(" ") + self.value))
+    def object_pair():
+        return group(STRING + COLON + indent(newline(" ") + value))
 
     @rule
-    def array(self):
+    def array():
         return group(
-            self.LSQUARE + opt(indent(newline() + self._array_items)) + newline() + self.RSQUARE
+            LSQUARE + opt(indent(newline() + _array_items)) + newline() + RSQUARE
         )
 
     @rule
-    def _array_items(self):
+    def _array_items():
         return alt(
-            self.value,
-            self.value + self.COMMA + newline(" ") + self._array_items,
+            value,
+            value + COMMA + newline(" ") + _array_items,
         )
 
-    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+    BLANKS = Terminal("BLANKS", Re.set(" ", "\t", "\r", "\n").plus())
 
-    LCURLY = Terminal("{")
-    RCURLY = Terminal("}")
-    COMMA = Terminal(",")
-    COLON = Terminal(":")
-    LSQUARE = Terminal("[")
-    RSQUARE = Terminal("]")
-    TRUE = Terminal("true")
-    FALSE = Terminal("false")
-    NULL = Terminal("null")
+    LCURLY = Terminal("LCURLY", "{")
+    RCURLY = Terminal("RCURLY", "}")
+    COMMA = Terminal("COMMA", ",")
+    COLON = Terminal("COLON", ":")
+    LSQUARE = Terminal("LSQUARE", "[")
+    RSQUARE = Terminal("RSQUARE", "]")
+    TRUE = Terminal("TRUE", "true")
+    FALSE = Terminal("FALSE", "false")
+    NULL = Terminal("NULL", "null")
     NUMBER = Terminal(
+        "NUMBER",
         Re.seq(
             Re.set(("0", "9")).plus(),
             Re.seq(
@@ -100,6 +97,7 @@ class JsonGrammar(Grammar):
         ),
     )
     STRING = Terminal(
+        "STRING",
         Re.seq(
             Re.literal('"'),
             (~Re.set('"', "\\") | (Re.set("\\") + Re.any())).star(),
@@ -107,8 +105,9 @@ class JsonGrammar(Grammar):
         )
     )
 
+    return Grammar(start=root, trivia=[BLANKS])
 
-JSON = JsonGrammar()
+JSON = make_json_grammar()
 JSON_PARSER = JSON.build_table()
 JSON_LEXER = JSON.compile_lexer()
 
@@ -228,47 +227,49 @@ def test_layout_basic():
     )
 
 
-class TG(Grammar):
-    start = "root"
-    trivia = ["BLANKS", "LINE_BREAK", "COMMENT"]
+def make_test_grammar():
+    @rule
+    def root():
+        return _expression
 
     @rule
-    def root(self):
-        return self._expression
+    def _expression():
+        return word | list
 
     @rule
-    def _expression(self):
-        return self.word | self.list
+    def list():
+        return group(LPAREN, indent(nl, _expressions), nl, RPAREN)
 
     @rule
-    def list(self):
-        return group(self.LPAREN, indent(nl, self._expressions), nl, self.RPAREN)
+    def _expressions():
+        return _expression | seq(_expressions, sp, _expression)
 
     @rule
-    def _expressions(self):
-        return self._expression | seq(self._expressions, sp, self._expression)
+    def word():
+        return OK | seq(BREAK, br, BREAK)
 
-    @rule
-    def word(self):
-        return self.OK | seq(self.BREAK, br, self.BREAK)
+    LPAREN = Terminal("LPAREN", "(")
+    RPAREN = Terminal("RPAREN", ")")
+    OK = Terminal("OK", "ok")
+    BREAK = Terminal("BREAK", "break")
 
-    LPAREN = Terminal("(")
-    RPAREN = Terminal(")")
-    OK = Terminal("ok")
-    BREAK = Terminal("break")
-
-    BLANKS = Terminal(Re.set(" ", "\t").plus())
-    LINE_BREAK = Terminal(Re.set("\r", "\n"), trivia_mode=TriviaMode.NewLine)
+    BLANKS = Terminal("BLANKS", Re.set(" ", "\t").plus())
+    LINE_BREAK = Terminal("LINE_BREAK", Re.set("\r", "\n"), trivia_mode=TriviaMode.NewLine)
     COMMENT = Terminal(
+        "COMMENT",
         Re.seq(Re.literal(";"), Re.set("\n").invert().star()),
         trivia_mode=TriviaMode.LineComment,
     )
 
+    return Grammar(start=root, trivia=[BLANKS, LINE_BREAK, COMMENT], pretty_indent="  ")
+
+TG = make_test_grammar()
+
+
 
 def test_forced_break():
-    g = TG()
-    g_lexer = g.compile_lexer()
-    g_parser = g.build_table()
+    g_lexer = TG.compile_lexer()
+    g_parser = TG.build_table()
 
     text = "((ok ok) (ok break break ok) (ok ok ok ok))"
 
@@ -276,29 +277,28 @@ def test_forced_break():
     assert errors == []
     assert tree is not None
 
-    printer = runtime.Printer(builder.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(TG))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
         """
 (
- (ok ok)
- (
-  ok
-  break
-  break
-  ok
- )
- (ok ok ok ok)
+  (ok ok)
+  (
+    ok
+    break
+    break
+    ok
+  )
+  (ok ok ok ok)
 )
     """
     )
 
 
 def test_maintaining_line_breaks():
-    g = TG()
-    g_lexer = g.compile_lexer()
-    g_parser = g.build_table()
+    g_lexer = TG.compile_lexer()
+    g_parser = TG.build_table()
 
     text = """((ok ok)
 ; Don't break here.
@@ -316,30 +316,29 @@ def test_maintaining_line_breaks():
     assert errors == []
     assert tree is not None
 
-    printer = runtime.Printer(builder.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(TG))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
         """
 (
- (ok ok)
- ; Don't break here.
- (ok)
-*SPACE*
- ; ^ Do keep this break though.
- (ok)
-*SPACE*
- ; ^ This should only be one break.
- (ok)
+  (ok ok)
+  ; Don't break here.
+  (ok)
+*SPACE**SPACE*
+  ; ^ Do keep this break though.
+  (ok)
+*SPACE**SPACE*
+  ; ^ This should only be one break.
+  (ok)
 )
     """
     )
 
 
 def test_trailing_trivia():
-    g = TG()
-    g_lexer = g.compile_lexer()
-    g_parser = g.build_table()
+    g_lexer = TG.compile_lexer()
+    g_parser = TG.build_table()
 
     text = """((ok ok)); Don't lose this!
 
@@ -350,7 +349,7 @@ def test_trailing_trivia():
     assert errors == []
     assert tree is not None
 
-    printer = runtime.Printer(builder.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(TG))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -363,9 +362,8 @@ def test_trailing_trivia():
 
 
 def test_trailing_trivia_two():
-    g = TG()
-    g_lexer = g.compile_lexer()
-    g_parser = g.build_table()
+    g_lexer = TG.compile_lexer()
+    g_parser = TG.build_table()
 
     text = """((ok ok))
 
@@ -376,7 +374,7 @@ def test_trailing_trivia_two():
     assert errors == []
     assert tree is not None
 
-    printer = runtime.Printer(builder.compile_pretty_table(g))
+    printer = runtime.Printer(builder.compile_pretty_table(TG))
     result = printer.format_tree(tree, text, 200).apply_to_source(text)
 
     assert result == _output(
@@ -389,9 +387,8 @@ def test_trailing_trivia_two():
 
 
 def test_trailing_trivia_split():
-    g = TG()
-    g_lexer = g.compile_lexer()
-    g_parser = g.build_table()
+    g_lexer = TG.compile_lexer()
+    g_parser = TG.build_table()
 
     text = """((ok ok)); Don't lose this!
 
@@ -432,7 +429,7 @@ def test_trailing_trivia_split():
         print(f"{mode:25} {t.kind:10}  {repr(text[t.start:t.end])}")
 
     trivia_doc = runtime.Matcher(
-        builder.MatcherTable(ParseTable([], [], set()), {}, {}),
+        builder.MatcherTable(ParseTable([], [], set(), {}), {}, {}),
         TRIVIA_MODES,
     ).apply_post_trivia(
         token.post_trivia,

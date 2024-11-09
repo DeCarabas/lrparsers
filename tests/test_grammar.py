@@ -1,6 +1,5 @@
 import pytest
 
-import parser
 import parser.runtime as runtime
 
 from parser import Grammar, seq, rule, Terminal
@@ -40,117 +39,68 @@ def _tree(treeform, count=0) -> runtime.Tree | runtime.TokenValue:
 def test_lr0_lr0():
     """An LR0 grammar should work with an LR0 generator."""
 
-    class G(Grammar):
-        start = "E"
-        # generator = parser.GenerateLR0
+    PLUS = Terminal("+", "+")
+    LPAREN = Terminal("(", "(")
+    RPAREN = Terminal(")", ")")
+    IDENTIFIER = Terminal("id", "id")
 
-        @rule
-        def E(self):
-            return seq(self.E, self.PLUS, self.T) | self.T
+    @rule
+    def E():
+        return seq(E, PLUS, T) | T
 
-        @rule
-        def T(self):
-            return seq(self.LPAREN, self.E, self.RPAREN) | self.IDENTIFIER
+    @rule
+    def T():
+        return seq(LPAREN, E, RPAREN) | IDENTIFIER
 
-        PLUS = Terminal("+", name="+")
-        LPAREN = Terminal("(", name="(")
-        RPAREN = Terminal(")", name=")")
-        IDENTIFIER = Terminal("id", name="id")
+    G = Grammar(start=E)
 
-    table = G().build_table()
-    tree, errors = runtime.Parser(table).parse(
-        Tokens(G.IDENTIFIER, G.PLUS, G.LPAREN, G.IDENTIFIER, G.RPAREN)
-    )
+    table = G.build_table()
+    tree, errors = runtime.Parser(table).parse(Tokens(IDENTIFIER, PLUS, LPAREN, IDENTIFIER, RPAREN))
 
     assert errors == []
     assert tree == _tree(("E", ("E", ("T", "id")), "+", ("T", "(", ("E", ("T", "id")), ")")))
 
 
-def test_all_generators():
-    """This grammar should work with everything honestly."""
-
-    class G(Grammar):
-        start = "E"
-
-        @rule
-        def E(self):
-            return seq(self.E, self.PLUS, self.T) | self.T
-
-        @rule
-        def T(self):
-            return seq(self.LPAREN, self.E, self.RPAREN) | self.IDENTIFIER
-
-        PLUS = Terminal("+", name="+")
-        LPAREN = Terminal("(", name="(")
-        RPAREN = Terminal(")", name=")")
-        IDENTIFIER = Terminal("id", name="id")
-
-    GENERATORS = [
-        # parser.GenerateLR0,
-        # parser.GeneratePager,
-        parser.ParserGenerator,
-    ]
-    for generator in GENERATORS:
-        table = G().build_table(generator=generator)
-        tree, errors = runtime.Parser(table).parse(
-            Tokens(G.IDENTIFIER, G.PLUS, G.LPAREN, G.IDENTIFIER, G.RPAREN)
-        )
-
-        print("\n")
-        print(generator)
-        print(f"{table.format()}")
-
-        assert errors == []
-        assert tree == _tree(("E", ("E", ("T", "id")), "+", ("T", "(", ("E", ("T", "id")), ")")))
-
 
 def test_grammar_aho_ullman_2():
-    class TestGrammar(Grammar):
-        start = "S"
+    @rule
+    def S():
+        return seq(X, X)
 
-        @rule
-        def S(self):
-            return seq(self.X, self.X)
+    @rule
+    def X():
+        return seq(A, X) | B
 
-        @rule
-        def X(self):
-            return seq(self.A, self.X) | self.B
+    A = Terminal("A", "a")
+    B = Terminal("B", "b")
 
-        A = Terminal("a")
-        B = Terminal("b")
-
-    TestGrammar().build_table(generator=parser.ParserGenerator)
-    # TestGrammar().build_table(generator=parser.GeneratePager)
+    Grammar(start=S).build_table()
 
 
 def test_fun_lalr():
+    @rule
+    def S():
+        return seq(V, E)
 
-    class TestGrammar(Grammar):
-        start = "S"
+    @rule
+    def E():
+        return F | seq(E, PLUS, F)
 
-        @rule
-        def S(self):
-            return seq(self.V, self.E)
+    @rule
+    def F():
+        return V | INT | seq(LPAREN, E, RPAREN)
 
-        @rule
-        def E(self):
-            return self.F | seq(self.E, self.PLUS, self.F)
+    @rule
+    def V():
+        return ID
 
-        @rule
-        def F(self):
-            return self.V | self.INT | seq(self.LPAREN, self.E, self.RPAREN)
+    PLUS = Terminal("PLUS", "+")
+    INT = Terminal("INT", "int")
+    ID = Terminal("ID", "id")
+    LPAREN = Terminal("LPAREN", "(")
+    RPAREN = Terminal("RPAREN", ")")
 
-        @rule
-        def V(self):
-            return self.ID
-
-        PLUS = Terminal("+")
-        INT = Terminal("int")
-        ID = Terminal("id")
-        LPAREN = Terminal("(")
-        RPAREN = Terminal(")")
-
-    TestGrammar().build_table()
+    Grammar(start=S).build_table()
 
 
 def test_conflicting_names():
@@ -167,43 +117,28 @@ def test_conflicting_names():
     to understand.
     """
 
-    class TestGrammar(Grammar):
-        start = "IDENTIFIER"
+    @rule("IDENTIFIER")
+    def identifier():
+        return IDENTIFIER
 
-        @rule("IDENTIFIER")
-        def identifier(self):
-            return self.IDENTIFIER
-
-        IDENTIFIER = Terminal("Identifier")
+    IDENTIFIER = Terminal("IDENTIFIER", "Identifier")
 
     with pytest.raises(ValueError):
-        TestGrammar().build_table()
+        Grammar(start=identifier).build_table()
 
 
 def test_grammar_ignore_trivia():
-    class G(Grammar):
-        start = "sentence"
+    @rule
+    def sentence():
+        return WORD | seq(sentence, WORD)
 
-        trivia = ["BLANK"]
+    WORD = Terminal("WORD", "blah")
+    BLANK = Terminal("BLANK", " ")
 
-        @rule
-        def sentence(self):
-            return self.WORD | seq(self.sentence, self.WORD)
-
-        WORD = Terminal("blah")
-        BLANK = Terminal(" ")
-
-    table = G().build_table()
+    table = Grammar(start=sentence, trivia=[BLANK]).build_table()
     assert "BLANK" in table.trivia
 
-    tree, errors = runtime.Parser(table).parse(
-        Tokens(
-            G.WORD,
-            G.BLANK,
-            G.WORD,
-            G.BLANK,
-        )
-    )
+    tree, errors = runtime.Parser(table).parse(Tokens(WORD, BLANK, WORD, BLANK))
 
     assert errors == []
     assert tree == runtime.Tree(
@@ -234,135 +169,3 @@ def test_grammar_ignore_trivia():
             ),
         ),
     )
-
-
-def test_grammar_unknown_trivia():
-    class G(Grammar):
-        start = "sentence"
-
-        trivia = ["BLANK"]
-
-        @rule
-        def sentence(self):
-            return self.WORD | seq(self.sentence, self.WORD)
-
-        WORD = Terminal("blah")
-
-    with pytest.raises(ValueError):
-        G().build_table()
-
-
-def test_grammar_trivia_symbol():
-    class G(Grammar):
-        start = "sentence"
-
-        @rule
-        def sentence(self):
-            return self.WORD | seq(self.sentence, self.WORD)
-
-        WORD = Terminal("blah")
-        BLANK = Terminal(" ")
-
-        trivia = [BLANK]
-
-    table = G().build_table()
-    assert "BLANK" in table.trivia
-
-
-def test_grammar_trivia_constructor():
-    class G(Grammar):
-        start = "sentence"
-
-        def __init__(self):
-            super().__init__(trivia=[self.BLANK])
-
-        @rule
-        def sentence(self):
-            return self.WORD | seq(self.sentence, self.WORD)
-
-        WORD = Terminal("blah")
-        BLANK = Terminal(" ")
-
-    table = G().build_table()
-    assert "BLANK" in table.trivia
-
-
-def test_grammar_trivia_constructor_string():
-    class G(Grammar):
-        start = "sentence"
-
-        def __init__(self):
-            super().__init__(trivia=["BLANK"])
-
-        @rule
-        def sentence(self):
-            return self.WORD | seq(self.sentence, self.WORD)
-
-        WORD = Terminal("blah")
-        BLANK = Terminal(" ")
-
-    table = G().build_table()
-    assert "BLANK" in table.trivia
-
-
-def test_grammar_trivia_constructor_string_unknown():
-    class G(Grammar):
-        start = "sentence"
-
-        def __init__(self):
-            super().__init__(trivia=["BLANK"])
-
-        @rule
-        def sentence(self):
-            return self.WORD | seq(self.sentence, self.WORD)
-
-        WORD = Terminal("blah")
-
-    with pytest.raises(ValueError):
-        G().build_table()
-
-
-def test_grammar_name_implicit():
-    class FooGrammar(Grammar):
-        start = "x"
-
-        @rule
-        def x(self):
-            return self.WORD
-
-        WORD = Terminal("blah")
-
-    assert FooGrammar().name == "foo"
-
-
-def test_grammar_name_explicit_member():
-    class FooGrammar(Grammar):
-        start = "x"
-
-        name = "bar"
-
-        @rule
-        def x(self):
-            return self.WORD
-
-        WORD = Terminal("blah")
-
-    assert FooGrammar().name == "bar"
-
-
-def test_grammar_name_explicit_constructor():
-    class FooGrammar(Grammar):
-        start = "x"
-
-        name = "bar"
-
-        def __init__(self):
-            super().__init__(name="baz")
-
-        @rule
-        def x(self):
-            return self.WORD
-
-        WORD = Terminal("blah")
-
-    assert FooGrammar().name == "baz"

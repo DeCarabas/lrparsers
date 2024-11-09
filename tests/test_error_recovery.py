@@ -11,138 +11,141 @@ import parser.runtime as runtime
 
 # Tests based on
 # https://matklad.github.io/2023/05/21/resilient-ll-parsing-tutorial.html
-class LGrammar(Grammar):
-    start = "File"
-    trivia = ["BLANKS"]
 
+BLANKS = Terminal("BLANKS", Re.set(" ", "\t", "\r", "\n").plus())
+
+TRUE = Terminal("TRUE", "true")
+FALSE = Terminal("FALSE", "false")
+INT = Terminal("INT", Re.set(("0", "9")).plus())
+FN = Terminal("FN", "fn")
+ARROW = Terminal("ARROW", "->")
+COMMA = Terminal("COMMA", ",")
+LPAREN = Terminal("LPAREN", "(")
+RPAREN = Terminal("RPAREN", ")")
+LCURLY = Terminal("LCURLY", "{")
+RCURLY = Terminal("RCURLY", "}")
+COLON = Terminal("COLON", ":")
+SEMICOLON = Terminal("SEMICOLON", ";")
+LET = Terminal("LET", "let")
+EQUAL = Terminal("EQUAL", "=")
+RETURN = Terminal("RETURN", "return")
+PLUS = Terminal("PLUS", "+")
+MINUS = Terminal("MINUS", "-")
+STAR = Terminal("STAR", "*")
+SLASH = Terminal("SLASH", "/")
+
+NAME = Terminal(
+    "NAME",
+    Re.seq(
+        Re.set(("a", "z"), ("A", "Z"), "_"),
+        Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
+    ),
+)
+
+
+@rule
+def File():
+    # TODO: Make lists easier
+    return _functions
+
+@rule
+def _functions():
+    return Function | (_functions + Function)
+
+@rule
+def Function():
+    return FN + NAME + ParamList + opt(ARROW + TypeExpr) + Block
+
+@rule
+def ParamList():
+    return LPAREN + opt(_parameters) + RPAREN
+
+@rule
+def _parameters():
+    # NOTE: The ungrammar in the reference does not talk about commas
+    #       required between parameters so this massages it to make them
+    #       required. Commas are in the list not the param, which is more
+    #       awkward for processing but not terminally so.
+    return (Param + opt(COMMA)) | (Param + COMMA + _parameters)
+
+@rule
+def Param():
+    return NAME + COLON + TypeExpr
+
+@rule
+def TypeExpr():
+    return NAME
+
+@rule
+def Block():
+    return LCURLY + opt(_statements) + RCURLY
+
+@rule
+def _statements():
+    return Stmt | _statements + Stmt
+
+@rule
+def Stmt():
+    return StmtExpr | StmtLet | StmtReturn
+
+@rule
+def StmtExpr():
+    return Expr + SEMICOLON
+
+@rule
+def StmtLet():
+    return LET + NAME + EQUAL + Expr + SEMICOLON
+
+@rule
+def StmtReturn():
+    return RETURN + Expr + SEMICOLON
+
+@rule
+def Expr():
+    return ExprLiteral | ExprName | ExprParen | ExprBinary | ExprCall
+
+@rule
+def ExprLiteral():
+    return INT | TRUE | FALSE
+
+@rule
+def ExprName():
+    return NAME
+
+@rule
+def ExprParen():
+    return LPAREN + Expr + RPAREN
+
+@rule
+def ExprBinary():
+    return Expr + (PLUS | MINUS | STAR | SLASH) + Expr
+
+@rule
+def ExprCall():
+    return Expr + ArgList
+
+@rule
+def ArgList():
+    return LPAREN + opt(_arg_star) + RPAREN
+
+@rule
+def _arg_star():
+    # Again, a deviation from the original. See _parameters.
+    return (Expr + opt(COMMA)) | (Expr + COMMA + _arg_star)
+
+LGrammar = Grammar(
+    start=File,
+    trivia=[BLANKS],
     # Need a little bit of disambiguation for the symbol involved.
     precedence = [
-        (Assoc.LEFT, ["PLUS", "MINUS"]),
-        (Assoc.LEFT, ["STAR", "SLASH"]),
-        (Assoc.LEFT, ["LPAREN"]),
-    ]
+        (Assoc.LEFT, [PLUS, MINUS]),
+        (Assoc.LEFT, [STAR, SLASH]),
+        (Assoc.LEFT, [LPAREN]),
+    ],
+)
 
-    @rule
-    def File(self):
-        # TODO: Make lists easier
-        return self._functions
-
-    @rule
-    def _functions(self):
-        return self.Function | (self._functions + self.Function)
-
-    @rule
-    def Function(self):
-        return self.FN + self.NAME + self.ParamList + opt(self.ARROW + self.TypeExpr) + self.Block
-
-    @rule
-    def ParamList(self):
-        return self.LPAREN + opt(self._parameters) + self.RPAREN
-
-    @rule
-    def _parameters(self):
-        # NOTE: The ungrammar in the reference does not talk about commas required between parameters
-        #       so this massages it to make them required. Commas are in the list not the param, which
-        #       is more awkward for processing but not terminally so.
-        return (self.Param + opt(self.COMMA)) | (self.Param + self.COMMA + self._parameters)
-
-    @rule
-    def Param(self):
-        return self.NAME + self.COLON + self.TypeExpr
-
-    @rule
-    def TypeExpr(self):
-        return self.NAME
-
-    @rule
-    def Block(self):
-        return self.LCURLY + opt(self._statements) + self.RCURLY
-
-    @rule
-    def _statements(self):
-        return self.Stmt | self._statements + self.Stmt
-
-    @rule
-    def Stmt(self):
-        return self.StmtExpr | self.StmtLet | self.StmtReturn
-
-    @rule
-    def StmtExpr(self):
-        return self.Expr + self.SEMICOLON
-
-    @rule
-    def StmtLet(self):
-        return self.LET + self.NAME + self.EQUAL + self.Expr + self.SEMICOLON
-
-    @rule
-    def StmtReturn(self):
-        return self.RETURN + self.Expr + self.SEMICOLON
-
-    @rule
-    def Expr(self):
-        return self.ExprLiteral | self.ExprName | self.ExprParen | self.ExprBinary | self.ExprCall
-
-    @rule
-    def ExprLiteral(self):
-        return self.INT | self.TRUE | self.FALSE
-
-    @rule
-    def ExprName(self):
-        return self.NAME
-
-    @rule
-    def ExprParen(self):
-        return self.LPAREN + self.Expr + self.RPAREN
-
-    @rule
-    def ExprBinary(self):
-        return self.Expr + (self.PLUS | self.MINUS | self.STAR | self.SLASH) + self.Expr
-
-    @rule
-    def ExprCall(self):
-        return self.Expr + self.ArgList
-
-    @rule
-    def ArgList(self):
-        return self.LPAREN + opt(self._arg_star) + self.RPAREN
-
-    @rule
-    def _arg_star(self):
-        # Again, a deviation from the original. See _parameters.
-        return (self.Expr + opt(self.COMMA)) | (self.Expr + self.COMMA + self._arg_star)
-
-    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
-
-    TRUE = Terminal("true")
-    FALSE = Terminal("false")
-    INT = Terminal(Re.set(("0", "9")).plus())
-    FN = Terminal("fn")
-    ARROW = Terminal("->")
-    COMMA = Terminal(",")
-    LPAREN = Terminal("(")
-    RPAREN = Terminal(")")
-    LCURLY = Terminal("{")
-    RCURLY = Terminal("}")
-    COLON = Terminal(":")
-    SEMICOLON = Terminal(";")
-    LET = Terminal("let")
-    EQUAL = Terminal("=")
-    RETURN = Terminal("return")
-    PLUS = Terminal("+")
-    MINUS = Terminal("-")
-    STAR = Terminal("*")
-    SLASH = Terminal("/")
-
-    NAME = Terminal(
-        Re.seq(
-            Re.set(("a", "z"), ("A", "Z"), "_"),
-            Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
-        ),
-    )
-
-
-L_PARSE_TABLE = LGrammar().build_table()
-L_LEXER_TABLE = LGrammar().compile_lexer()
+L_PARSE_TABLE = LGrammar.build_table()
+L_LEXER_TABLE = LGrammar.compile_lexer()
 
 
 def test_matklad_one():

@@ -17,25 +17,24 @@ the thing that processes the tables.
 
 ## Making Grammars
 
-To get started, create a grammar that derives from the `Grammar` class. Create
-one method per nonterminal, decorated with the `rule` decorator. Here's an
-example:
+Define a series of terminals (with `Terminal`) and rules (as functions decorated
+with `@rule`), and then pass the starting rule to the constructor of a `Grammar`
+object:
 
+    @rule
+    def expression(self):
+        return seq(self.expression, self.PLUS, self.term) | self.term
 
-    class SimpleGrammar(Grammar):
-        @rule
-        def expression(self):
-            return seq(self.expression, self.PLUS, self.term) | self.term
+    @rule
+    def term(self):
+        return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
 
-        @rule
-        def term(self):
-            return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
+    PLUS = Terminal('+')
+    LPAREN = Terminal('(')
+    RPAREN = Terminal(')')
+    ID = Terminal('id')
 
-        PLUS = Terminal('+')
-        LPAREN = Terminal('(')
-        RPAREN = Terminal(')')
-        ID = Terminal('id')
-
+    grammar = Grammar(start=expression)
 
 ## Using grammars
 
@@ -1533,7 +1532,9 @@ class ParserGenerator:
         return builder.flush(config_sets)
 
 
-FlattenedWithMetadata = list["str|Terminal|tuple[dict[str,typing.Any],FlattenedWithMetadata]"]
+FlattenedWithMetadata = list[
+    "NonTerminal|Terminal|tuple[dict[str,typing.Any],FlattenedWithMetadata]"
+]
 
 
 ###############################################################################
@@ -1578,25 +1579,31 @@ class Rule:
 class Terminal(Rule):
     """A token, or terminal symbol in the grammar."""
 
-    name: str | None
+    name: str
     pattern: "str | Re"
     meta: dict[str, typing.Any]
     regex: bool
     error_name: str | None
+    definition_location: str
 
     def __init__(
         self,
+        name: str,
         pattern: "str|Re",
         *,
-        name: str | None = None,
         error_name: str | None = None,
         **kwargs,
     ):
+        # TODO: Consider identifying the name from some kind of globals
+        #       dictionary or something if necessary.
         self.name = name
         self.pattern = pattern
         self.meta = kwargs
         self.regex = isinstance(pattern, Re)
         self.error_name = error_name
+
+        caller = inspect.stack()[1]
+        self.definition_location = f"{caller.filename}:{caller.lineno}"
 
     def flatten(
         self, with_metadata: bool = False
@@ -1617,14 +1624,17 @@ class NonTerminal(Rule):
     grammar class.
     """
 
-    fn: typing.Callable[["Grammar"], Rule]
+    fn: typing.Callable[[], Rule]
     name: str
     transparent: bool
     error_name: str | None
+    definition_location: str
+    _definition: Rule | None
+    _body: "list[list[NonTerminal | Terminal]] | None"
 
     def __init__(
         self,
-        fn: typing.Callable[["Grammar"], Rule],
+        fn: typing.Callable[[], Rule],
         name: str | None = None,
         transparent: bool = False,
         error_name: str | None = None,
@@ -1645,22 +1655,37 @@ class NonTerminal(Rule):
         self.name = name or fn.__name__
         self.transparent = transparent
         self.error_name = error_name
+        self._definition = None
+        self._body = None
 
-    def generate_body(self, grammar) -> list[list[str | Terminal]]:
-        """Generate the body of the non-terminal.
+        caller = inspect.stack()[1]
+        self.definition_location = f"{caller.filename}:{caller.lineno}"
 
-        We do this by first calling the associated function in order to get a
-        Rule, and then flattening the Rule into the associated set of
-        productions. We strip the metadata from the flattened result to make
-        life a little easier for the caller.
+    @property
+    def definition(self) -> Rule:
+        """The rule that is the definition of this nonterminal.
+
+        (As opposed this rule itself, which is... itself.)
+        """
+        if self._definition is None:
+            self._definition = self.fn()
+        return self._definition
+
+    @property
+    def body(self) -> "list[list[NonTerminal | Terminal]]":
+        """The flattened body of the nonterminal: a list of productions where
+        each production is a sequence of Terminals and NonTerminals.
         """
 
-        def without_metadata(result: FlattenedWithMetadata) -> list[str | Terminal]:
+        def without_metadata(result: FlattenedWithMetadata) -> list[NonTerminal | Terminal]:
             for item in result:
                 assert not isinstance(item, tuple)
-            return typing.cast(list[str | Terminal], result)
+            return typing.cast(list[NonTerminal | Terminal], result)
 
-        return [without_metadata(rule) for rule in self.fn(grammar).flatten(with_metadata=False)]
+        if self._body is None:
+            self._body = [without_metadata(rule) for rule in self.fn().flatten(with_metadata=False)]
+
+        return self._body
 
     def flatten(
         self, with_metadata: bool = False
@@ -1669,7 +1694,7 @@ class NonTerminal(Rule):
         # the context of some other production. Yield ourselves, and trust that
         # in time we will be asked to generate our body.
         del with_metadata
-        yield [self.name]
+        yield [self]
 
 
 class AlternativeRule(Rule):
@@ -1775,7 +1800,7 @@ def mark(rule: Rule, **kwargs) -> Rule:
 
 
 @typing.overload
-def rule(f: typing.Callable, /) -> Rule: ...
+def rule(f: typing.Callable, /) -> NonTerminal: ...
 
 
 @typing.overload
@@ -1783,16 +1808,15 @@ def rule(
     name: str | None = None,
     transparent: bool | None = None,
     error_name: str | None = None,
-) -> typing.Callable[[typing.Callable[[typing.Any], Rule]], Rule]: ...
+) -> typing.Callable[[typing.Callable[[], Rule]], NonTerminal]: ...
 
 
 def rule(
     name: str | None | typing.Callable = None,
     transparent: bool | None = None,
     error_name: str | None = None,
-) -> Rule | typing.Callable[[typing.Callable[[typing.Any], Rule]], Rule]:
-    """The decorator that marks a method in a Grammar object as a nonterminal
-    rule.
+) -> NonTerminal | typing.Callable[[typing.Callable[[], Rule]], NonTerminal]:
+    """The decorator that marks a function as a nonterminal rule.
 
     As with all the best decorators, it can be called with or without arguments.
     If called with one argument, that argument is a name that overrides the name
@@ -1801,7 +1825,7 @@ def rule(
     if callable(name):
         return rule()(name)
 
-    def wrapper(f: typing.Callable[[typing.Any], Rule]):
+    def wrapper(f: typing.Callable[[], Rule]):
         nonlocal name
         nonlocal transparent
         nonlocal error_name
@@ -2746,145 +2770,150 @@ class TriviaMode(enum.Enum):
 
 
 ###############################################################################
-# Finally, the base class for grammars
+# Finally, the grammar class.
 ###############################################################################
 
-PrecedenceList = list[typing.Tuple[Assoc, list[Rule | str]]]
+PrecedenceList = list[typing.Tuple[Assoc, list[Terminal|NonTerminal]]]
+
+def gather_grammar(start: NonTerminal, trivia: list[Terminal]) -> tuple[dict[str,NonTerminal], dict[str,Terminal]]:
+    """Starting from the given NonTerminal, gather all of the symbols
+    (NonTerminals and Terminals) that make up the grammar.
+    """
+    # NOTE: We use a dummy dictionary here to preserve insertion order.
+    #       That way the first element in named_rules is always the start
+    #       symbol!
+    rules: dict[NonTerminal, int] = {}
+    terminals: dict[Terminal, int] = {}
+
+    # STEP 1 is to just gather all of the symbols that we can find.
+    queue: list[NonTerminal] = [start]
+    while len(queue) > 0:
+        nt = queue.pop()
+        if nt in rules:
+            continue
+
+        # TODO: Here we can track modules (via the funcitons that make up
+        #       nonterminals, maybe) and maybe use that to infer terminal
+        #       names.
+        rules[nt] = len(rules)
+
+        for rule in nt.body:
+            for symbol in rule:
+                if isinstance(symbol, NonTerminal):
+                    if symbol not in rules:
+                        queue.append(symbol)
+
+                elif isinstance(symbol, Terminal):
+                    terminals[symbol] = len(terminals)
+
+                else:
+                    typing.assert_never(symbol)
+
+    # (Terminals are also reachable!)
+    for symbol in trivia:
+        terminals[symbol] = len(terminals)
+
+    # Step 2 is to organize all of these things and check them for errors.
+    named_rules: dict[str, NonTerminal] = {}
+    for rule in rules:
+        existing = named_rules.get(rule.name)
+        if existing is not None:
+            # TODO TEST
+            raise ValueError(f"""Found more than one rule named {rule.name}:
+- {existing.definition_location}
+- {rule.definition_location}""")
+        named_rules[rule.name] = rule
+
+    named_terminals: dict[str, Terminal] = {}
+    for terminal in terminals:
+        existing = named_terminals.get(terminal.name)
+        if existing is not None:
+            # TODO TEST
+            raise ValueError(f"""Found more than one terminal named {terminal.name}:
+- {existing.definition_location}
+- {terminal.definition_location}""")
+
+        existing_rule = named_rules.get(terminal.name)
+        if existing_rule is not None:
+            # TODO TEST
+            raise ValueError(f"""Found a terminal and a rule both named {terminal.name}:
+- The rule was defined at {existing_rule.definition_location}
+- The terminal was defined at {terminal.definition_location}""")
+
+        named_terminals[terminal.name] = terminal
+
+    return (named_rules, named_terminals)
 
 
 class Grammar:
-    """The base class for defining a grammar.
-
-    Inherit from this, and and define members for your nonterminals, and then
-    use the `build_table` method to construct the parse tables.
-
+    """A container that holds all the terminals and nonterminals for a
+    given grammar. The terminals and nonterminals are defined elsewhere;
+    provide the starting rule and this object will build the grammar from
+    everything accessible.
 
     Here's an example of a simple grammar:
 
-        class SimpleGrammar(Grammar):
-            @rule
-            def expression(self):
-                return seq(self.expression, self.PLUS, self.term) | self.term
+    @rule
+    def expression(self):
+        return seq(self.expression, self.PLUS, self.term) | self.term
 
-            @rule
-            def term(self):
-                return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
+    @rule
+    def term(self):
+        return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
 
-            PLUS = Terminal('+')
-            LPAREN = Terminal('(')
-            RPAREN = Terminal(')')
-            ID = Terminal('id')
+    PLUS = Terminal('+')
+    LPAREN = Terminal('(')
+    RPAREN = Terminal(')')
+    ID = Terminal('id')
 
+    grammar = Grammar(start=expression)
 
     Not very exciting, perhaps, but it's something.
     """
 
-    _precedence: dict[str, typing.Tuple[Assoc, int]]
-    _generator: type[ParserGenerator]
+    start: NonTerminal
+    name: str
+    pretty_indent: str | None
     _terminals: dict[str, Terminal]
     _nonterminals: dict[str, NonTerminal]
     _trivia: list[Terminal]
+    _precedence: dict[str, typing.Tuple[Assoc, int]]
 
     def __init__(
         self,
-        start: str | NonTerminal | None = None,
+        start: NonTerminal,
         precedence: PrecedenceList | None = None,
-        generator: type[ParserGenerator] | None = None,
-        trivia: list[str | Terminal] | None = None,
+        trivia: list[Terminal] | None = None,
         name: str | None = None,
+        pretty_indent: str | None = None,
     ):
-        if start is None:
-            start = getattr(self, "start", None)
-        if start is None:
-            raise ValueError(
-                "The default start rule must either be specified in the constructor or as an "
-                "attribute in the class."
-            )
-        if isinstance(start, NonTerminal):
-            start = start.name
+        if start.transparent:
+            # TODO: TEST
+            raise ValueError("The start rule cannot be transparent")
 
         if precedence is None:
-            precedence = getattr(self, "precedence", [])
+            precedence = []
         assert precedence is not None
 
-        if generator is None:
-            generator = getattr(self, "generator", ParserGenerator)
-        assert generator is not None
-
         if trivia is None:
-            trivia = getattr(self, "trivia", [])
+            trivia = []
         assert trivia is not None
-
-        # Fixup terminal names with the name of the member that declared it.
-        terminals = {}
-        for n, t in inspect.getmembers(self, lambda x: isinstance(x, Terminal)):
-            if t.name is None:
-                t.name = n
-
-            if n in terminals:
-                raise ValueError(f"More than one terminal has the name '{n}'")
-            terminals[n] = t
-
-        # Get the nonterminals.
-        nonterminals = {}
-        for _, nt in inspect.getmembers(self, lambda x: isinstance(x, NonTerminal)):
-            if nt.name in nonterminals:
-                raise ValueError(f"More than one nonterminal found with the name '{nt.name}'")
-
-            if nt.name in terminals:
-                raise ValueError(
-                    f"'{nt.name}' is the name of both a Terminal and a NonTerminal rule"
-                )
-
-            nonterminals[nt.name] = nt
-
-        # Resolve the trivia declarations correctly.
-        resolved_trivia: list[Terminal] = []
-        for t in trivia:
-            if isinstance(t, str):
-                resolved = terminals.get(t)
-                if resolved is None:
-                    raise ValueError(f"The trivia '{t}' is not a terminal name")
-                resolved_trivia.append(resolved)
-            elif isinstance(t, Terminal):
-                resolved_trivia.append(t)
-            else:
-                raise ValueError(f"{t} must be either a terminal name or literally a terminal")
 
         # Fix up the precedence table.
         precedence_table = {}
         for prec, (associativity, symbols) in enumerate(precedence):
             for symbol in symbols:
-                key = None
-                if isinstance(symbol, Terminal):
-                    key = symbol.name
-                    if key is None:
-                        raise ValueError(f"{symbol} is a terminal that has not had a name set yet")
-                elif isinstance(symbol, NonTerminal):
-                    key = symbol.name
-                elif isinstance(symbol, str):
-                    if symbol in terminals or symbol in nonterminals:
-                        key = symbol
-
-                if key is None:
-                    raise ValueError(
-                        f"{symbol} must be either a Token or a NonTerminal, or the name of one"
-                    )
-
-                precedence_table[key] = (associativity, prec + 1)
+                precedence_table[symbol.name] = (associativity, prec + 1)
 
         if name is None:
-            name = getattr(self, "name", None)
-        if name is None:
-            name = self.__class__.__name__.removesuffix("Grammar").lower()
+            name = "unknown"
 
-        self._precedence = precedence_table
         self.start = start
-        self._generator = generator
-        self._terminals = terminals
-        self._nonterminals = nonterminals
-        self._trivia = resolved_trivia
         self.name = name
+        self._nonterminals, self._terminals = gather_grammar(start, trivia)
+        self._trivia = trivia
+        self._precedence = precedence_table
+        self.pretty_indent = pretty_indent
 
     def terminals(self) -> list[Terminal]:
         return list(self._terminals.values())
@@ -2898,55 +2927,7 @@ class Grammar:
     def get_precedence(self, name: str) -> None | tuple[Assoc, int]:
         return self._precedence.get(name)
 
-    # TODO: The flattened form should retain NonTerminal, not just str.
-    def generate_nonterminal_dict(
-        self, start: str | None = None
-    ) -> typing.Tuple[dict[str, list[list[str | Terminal]]], set[str]]:
-        """Convert the rules into a dictionary of productions, and a set of
-        the names of transparent nonterminals.
-
-        Our table generators work on a very flat set of productions. This is the
-        first step in flattening the productions from the members: walk the rules
-        starting from the given start rule and flatten them, one by one, into a
-        dictionary that maps nonterminal rule name to its associated list of
-        productions.
-        """
-        if start is None:
-            start = self.start
-
-        nonterminals = self._nonterminals
-        transparents = {rule.name for rule in nonterminals.values() if rule.transparent}
-
-        grammar = {}
-
-        rule = nonterminals.get(start)
-        if rule is None:
-            raise ValueError(f"Cannot find a rule named '{start}'")
-        if rule.transparent:
-            raise ValueError("The start rule cannot be transparent")
-        queue = [rule]
-        while len(queue) > 0:
-            rule = queue.pop()
-            if rule.name in grammar:
-                continue
-
-            body = rule.generate_body(self)
-            for clause in body:
-                for symbol in clause:
-                    if not isinstance(symbol, Terminal):
-                        assert isinstance(symbol, str)
-                        nonterminal = nonterminals.get(symbol)
-                        if nonterminal is None:
-                            raise ValueError(f"While processing {rule.name}: cannot find {symbol}")
-                        queue.append(nonterminal)
-
-            grammar[rule.name] = body
-
-        return (grammar, transparents)
-
-    def desugar(
-        self, start: str | None = None
-    ) -> typing.Tuple[list[typing.Tuple[str, list[str]]], set[str]]:
+    def desugar(self) -> typing.Tuple[list[typing.Tuple[str, list[str]]], set[str]]:
         """Convert the rules into a flat list of productions.
 
         Our table generators work from a very flat set of productions. The form
@@ -2954,37 +2935,27 @@ class Grammar:
         generate_nonterminal_dict- less useful to people, probably, but it is
         the input form needed by the Generator.
         """
-        temp_grammar, transparents = self.generate_nonterminal_dict(start)
+        grammar: list[tuple[str,list[str]]] = [
+            (rule.name, [s.name for s in production])
+            for rule in self._nonterminals.values()
+            for production in rule.body
+        ]
+        assert grammar[0][0] == self.start.name
 
-        grammar = []
-        for rule_name, clauses in temp_grammar.items():
-            for clause in clauses:
-                new_clause = []
-                for symbol in clause:
-                    if isinstance(symbol, Terminal):
-                        if symbol.name in temp_grammar:
-                            raise ValueError(
-                                f"'{symbol.name}' is the name of both a Terminal and a NonTerminal rule. This will cause problems."
-                            )
-                        new_clause.append(symbol.name)
-                    else:
-                        new_clause.append(symbol)
-
-                grammar.append((rule_name, new_clause))
+        transparents = {name for name, rule in self._nonterminals.items() if rule.transparent}
 
         return grammar, transparents
 
-    def build_table(self, start: str | None = None, generator=None) -> ParseTable:
-        """Construct a parse table for this grammar, starting at the named
-        nonterminal rule.
-        """
-        if start is None:
-            start = self.start
-        desugared, transparents = self.desugar(start)
+    def build_table(self) -> ParseTable:
+        """Construct a parse table for this grammar."""
+        desugared, transparents = self.desugar()
 
-        if generator is None:
-            generator = self._generator
-        gen = generator(start, desugared, precedence=self._precedence, transparents=transparents)
+        gen = ParserGenerator(
+            self.start.name,
+            desugared,
+            precedence=self._precedence,
+            transparents=transparents,
+        )
         table = gen.gen_table()
 
         for t in self._trivia:
