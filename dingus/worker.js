@@ -1,4 +1,4 @@
-const PARSER_PACKAGE = "./wheel/lrparsers-0.7.9-py3-none-any.whl"
+const PARSER_PACKAGE = "./wheel/lrparsers-0.8-py3-none-any.whl"
 
 
 // Load the whole pyodide thingy.
@@ -108,9 +108,6 @@ def eval_grammar(code):
 
     grammar = None
     for key, value in grammar_globals.items():
-      if isinstance(value, type) and issubclass(value, parser.Grammar) and value is not parser.Grammar:
-        value = value()
-
       if isinstance(value, parser.Grammar):
         if grammar is None:
           grammar = value
@@ -118,7 +115,7 @@ def eval_grammar(code):
           raise Exception("More than one Grammar found in the file")
 
     if grammar is None:
-      raise Exception("No grammar definition, define or instantiate a class that inherits from parser.Grammar")
+      raise Exception("No grammar definition, make an instance of parser.Grammar")
 
     GRAMMAR = grammar
 
