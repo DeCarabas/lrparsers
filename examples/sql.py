@@ -171,7 +171,7 @@ def sql():
 
 @rule
 def schema():
-    seq(
+    return seq(
         CREATE,
         SCHEMA,
         AUTHORIZATION,
@@ -759,3 +759,7 @@ SQL = Grammar(
     trivia=[BLANKS, COMMENT, LINE_BREAK],
     name="SQL",
 )
+
+if __name__=="__main__":
+    tbl = SQL.build_table()
+    print(tbl.format())

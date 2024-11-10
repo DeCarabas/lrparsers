@@ -514,6 +514,7 @@ FineGrammar=Grammar(
 )
 
 if __name__ == "__main__":
+    import os
     from pathlib import Path
     from parser.parser import dump_lexer_table
     from parser.emacs import emit_emacs_major_mode
@@ -530,6 +531,7 @@ if __name__ == "__main__":
 
     # Generate tree-sitter parser and emacs mode.
     ts_path = Path(__file__).parent / "tree-sitter-fine"
+    os.makedirs(ts_path, exist_ok=True)
     emit_tree_sitter_grammar(grammar, ts_path)
     emit_tree_sitter_queries(grammar, ts_path)
     emit_emacs_major_mode(grammar, ts_path / "fine.el")
