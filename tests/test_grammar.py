@@ -2,7 +2,7 @@ import pytest
 
 import parser.runtime as runtime
 
-from parser import Grammar, seq, rule, Terminal
+from parser import Grammar, seq, rule, Terminal, one_or_more
 
 
 class Tokens:
@@ -159,6 +159,43 @@ def test_grammar_ignore_trivia():
                         [runtime.TokenValue("BLANK", 1, 2, [], [])],
                     ),
                 ),
+            ),
+            runtime.TokenValue(
+                "WORD",
+                2,
+                3,
+                [runtime.TokenValue("BLANK", 1, 2, [], [])],
+                [runtime.TokenValue("BLANK", 3, 4, [], [])],
+            ),
+        ),
+    )
+
+
+def test_one_or_more():
+    @rule
+    def sentence():
+        return one_or_more(WORD)
+
+    WORD = Terminal("WORD", "blah")
+    BLANK = Terminal("BLANK", " ")
+
+    table = Grammar(start=sentence, trivia=[BLANK]).build_table()
+    assert "BLANK" in table.trivia
+
+    tree, errors = runtime.Parser(table).parse(Tokens(WORD, BLANK, WORD, BLANK))
+
+    assert errors == []
+    assert tree == runtime.Tree(
+        "sentence",
+        0,
+        3,
+        (
+            runtime.TokenValue(
+                "WORD",
+                0,
+                1,
+                [],
+                [runtime.TokenValue("BLANK", 1, 2, [], [])],
             ),
             runtime.TokenValue(
                 "WORD",

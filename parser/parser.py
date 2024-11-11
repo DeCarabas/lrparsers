@@ -1116,7 +1116,7 @@ class ParserGenerator:
 
         # Check to make sure they didn't use anything that will give us
         # heartburn later.
-        reserved = [a for a in alphabet if a.startswith("__") or a == "$"]
+        reserved = [a for a in alphabet if (a.startswith("__") and not a.startswith("__gen_")) or a == "$"]
         if reserved:
             raise ValueError(
                 "Can't use {symbols} in grammars, {what} reserved.".format(
@@ -1616,6 +1616,9 @@ class Terminal(Rule):
         return self.name or "<Unknown terminal>"
 
 
+_CURRENT_DEFINITION: str = "__global"
+_CURRENT_GEN_INDEX: int = 0
+
 class NonTerminal(Rule):
     """A non-terminal, or a production, in the grammar.
 
@@ -1676,6 +1679,8 @@ class NonTerminal(Rule):
         """The flattened body of the nonterminal: a list of productions where
         each production is a sequence of Terminals and NonTerminals.
         """
+        global _CURRENT_DEFINITION
+        global _CURRENT_GEN_INDEX
 
         def without_metadata(result: FlattenedWithMetadata) -> list[NonTerminal | Terminal]:
             for item in result:
@@ -1683,7 +1688,17 @@ class NonTerminal(Rule):
             return typing.cast(list[NonTerminal | Terminal], result)
 
         if self._body is None:
-            self._body = [without_metadata(rule) for rule in self.fn().flatten(with_metadata=False)]
+            prev_defn = _CURRENT_DEFINITION
+            prev_idx = _CURRENT_GEN_INDEX
+            try:
+                _CURRENT_DEFINITION = self.name
+                _CURRENT_GEN_INDEX = 0
+                body = self.fn()
+                self._body = [without_metadata(rule) for rule in body.flatten(with_metadata=False)]
+            finally:
+                _CURRENT_DEFINITION = prev_defn
+                _CURRENT_GEN_INDEX = prev_idx
+
 
         return self._body
 
@@ -1798,6 +1813,28 @@ def opt(*args: Rule) -> Rule:
 def mark(rule: Rule, **kwargs) -> Rule:
     return MetadataRule(rule, kwargs)
 
+
+def one_or_more(r: Rule) -> Rule:
+    global _CURRENT_DEFINITION
+    global _CURRENT_GEN_INDEX
+
+    tail : NonTerminal | None = None
+    def impl() -> Rule:
+        nonlocal tail
+        assert(tail is not None)
+        return opt(tail) + r
+
+    tail = NonTerminal(
+        fn=impl,
+        name=f"__gen_{_CURRENT_DEFINITION}_{_CURRENT_GEN_INDEX}",
+        transparent=True,
+    )
+    _CURRENT_GEN_INDEX = _CURRENT_GEN_INDEX + 1
+
+    return tail
+
+def zero_or_more(r:Rule) -> Rule:
+    return opt(one_or_more(r))
 
 @typing.overload
 def rule(f: typing.Callable, /) -> NonTerminal: ...
@@ -2082,6 +2119,13 @@ class Re:
 
     def __str__(self) -> str:
         raise NotImplementedError()
+
+    @classmethod
+    def alt(cls, *values: "Re") -> "Re":
+        result = values[0]
+        for v in values[1:]:
+            result = ReAlt(result, v)
+        return result
 
     @classmethod
     def seq(cls, *values: "Re") -> "Re":
@@ -2615,6 +2659,7 @@ class LanguageVariableHighlight(VariableHighlight):
 class _Highlight:
     class _Comment(CommentHighlight):
         line = LineCommentHighlight()
+        block = BlockCommentHighlight()
 
     class _Constant(ConstantHighlight):
         language = LanguageConstantHighlight()
