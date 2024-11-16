@@ -1116,7 +1116,9 @@ class ParserGenerator:
 
         # Check to make sure they didn't use anything that will give us
         # heartburn later.
-        reserved = [a for a in alphabet if (a.startswith("__") and not a.startswith("__gen_")) or a == "$"]
+        reserved = [
+            a for a in alphabet if (a.startswith("__") and not a.startswith("__gen_")) or a == "$"
+        ]
         if reserved:
             raise ValueError(
                 "Can't use {symbols} in grammars, {what} reserved.".format(
@@ -1619,6 +1621,7 @@ class Terminal(Rule):
 _CURRENT_DEFINITION: str = "__global"
 _CURRENT_GEN_INDEX: int = 0
 
+
 class NonTerminal(Rule):
     """A non-terminal, or a production, in the grammar.
 
@@ -1698,7 +1701,6 @@ class NonTerminal(Rule):
             finally:
                 _CURRENT_DEFINITION = prev_defn
                 _CURRENT_GEN_INDEX = prev_idx
-
 
         return self._body
 
@@ -1827,10 +1829,11 @@ def one_or_more(*args: Rule) -> Rule:
     global _CURRENT_DEFINITION
     global _CURRENT_GEN_INDEX
 
-    tail : NonTerminal | None = None
+    tail: NonTerminal | None = None
+
     def impl() -> Rule:
         nonlocal tail
-        assert(tail is not None)
+        assert tail is not None
         return opt(tail) + seq(*args)
 
     tail = NonTerminal(
@@ -1842,6 +1845,7 @@ def one_or_more(*args: Rule) -> Rule:
 
     return tail
 
+
 def zero_or_more(*args: Rule) -> Rule:
     """Generate a rule that matches a repetition of zero or more of the specified
     rule.
@@ -1851,6 +1855,7 @@ def zero_or_more(*args: Rule) -> Rule:
     create a named nonterminal to contain it.
     """
     return opt(one_or_more(*args))
+
 
 @typing.overload
 def rule(f: typing.Callable, /) -> NonTerminal: ...
@@ -2848,9 +2853,12 @@ class TriviaMode(enum.Enum):
 # Finally, the grammar class.
 ###############################################################################
 
-PrecedenceList = list[typing.Tuple[Assoc, list[Terminal|NonTerminal]]]
+PrecedenceList = list[typing.Tuple[Assoc, list[Terminal | NonTerminal]]]
 
-def gather_grammar(start: NonTerminal, trivia: list[Terminal]) -> tuple[dict[str,NonTerminal], dict[str,Terminal]]:
+
+def gather_grammar(
+    start: NonTerminal, trivia: list[Terminal]
+) -> tuple[dict[str, NonTerminal], dict[str, Terminal]]:
     """Starting from the given NonTerminal, gather all of the symbols
     (NonTerminals and Terminals) that make up the grammar.
     """
@@ -2894,9 +2902,11 @@ def gather_grammar(start: NonTerminal, trivia: list[Terminal]) -> tuple[dict[str
         existing = named_rules.get(rule.name)
         if existing is not None:
             # TODO TEST
-            raise ValueError(f"""Found more than one rule named {rule.name}:
+            raise ValueError(
+                f"""Found more than one rule named {rule.name}:
 - {existing.definition_location}
-- {rule.definition_location}""")
+- {rule.definition_location}"""
+            )
         named_rules[rule.name] = rule
 
     named_terminals: dict[str, Terminal] = {}
@@ -2904,16 +2914,20 @@ def gather_grammar(start: NonTerminal, trivia: list[Terminal]) -> tuple[dict[str
         existing = named_terminals.get(terminal.name)
         if existing is not None:
             # TODO TEST
-            raise ValueError(f"""Found more than one terminal named {terminal.name}:
+            raise ValueError(
+                f"""Found more than one terminal named {terminal.name}:
 - {existing.definition_location}
-- {terminal.definition_location}""")
+- {terminal.definition_location}"""
+            )
 
         existing_rule = named_rules.get(terminal.name)
         if existing_rule is not None:
             # TODO TEST
-            raise ValueError(f"""Found a terminal and a rule both named {terminal.name}:
+            raise ValueError(
+                f"""Found a terminal and a rule both named {terminal.name}:
 - The rule was defined at {existing_rule.definition_location}
-- The terminal was defined at {terminal.definition_location}""")
+- The terminal was defined at {terminal.definition_location}"""
+            )
 
         named_terminals[terminal.name] = terminal
 
@@ -3010,7 +3024,7 @@ class Grammar:
         generate_nonterminal_dict- less useful to people, probably, but it is
         the input form needed by the Generator.
         """
-        grammar: list[tuple[str,list[str]]] = [
+        grammar: list[tuple[str, list[str]]] = [
             (rule.name, [s.name for s in production])
             for rule in self._nonterminals.values()
             for production in rule.body

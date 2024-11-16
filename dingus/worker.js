@@ -176,19 +176,21 @@ const pyodide_promise = setup_python();
 async function load_grammar_module(code) {
   const pyodide = self.pyodide;
 
-  // console.log("Running...");
+  console.log("eval_grammar: Running");
   const my_fn = pyodide.globals.get("eval_grammar");
   my_fn(code);
   my_fn.destroy();
+  console.log("eval_grammar: Done");
 }
 
 async function parse_document(code) {
   const pyodide = self.pyodide;
 
-  // console.log("Running...");
+  console.log("eval_document: Running");
   const my_fn = pyodide.globals.get("eval_document");
   my_fn(code);
   my_fn.destroy();
+  console.log("eval_document: Done");
 }
 
 self.onmessage = async function(event) {
@@ -197,8 +199,10 @@ self.onmessage = async function(event) {
   try {
     const { kind, data } = event.data;
     if (kind === "grammar") {
+      console.log("Worker received grammar")
       await load_grammar_module(data);
     } else if (kind === "input") {
+      console.log("Worker received input")
       await parse_document(data);
     }
   } catch (e) {

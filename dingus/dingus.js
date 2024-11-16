@@ -129,14 +129,17 @@ function render_state(state, input_editor) {
  * otherwise just queue it for submission.
  */
 function post_document(worker, kind, state, document) {
+  console.log("Received document", kind)
   if (window.localStorage) {
     window.localStorage.setItem(kind, document);
   }
 
   let new_state = {...state};
   if (new_state.pending) {
+    console.log("Document parked", kind)
     new_state.next = document;
   } else {
+    console.log("Document submitted", kind)
     new_state.pending = document;
     new_state.next = null;
     worker.postMessage({kind, data: document});
@@ -151,6 +154,7 @@ function post_document(worker, kind, state, document) {
 function rotate_document(worker, kind, state) {
   let new_state = {...state, last: state.pending, pending: null};
   if (new_state.next) {
+    console.log("Rotating document", kind)
     new_state.pending = new_state.next;
     new_state.next = null;
     worker.postMessage({kind, data: new_state.pending});
