@@ -1457,7 +1457,18 @@ class ParserGenerator:
                         lookahead.update(context)
 
                     for rule in rules:
-                        new_core = Configuration.from_rule(config_next, rule)
+                        if len(rule) == 0:
+                            next = None
+                        else:
+                            next = rule[0]
+
+                        new_core = Configuration(
+                            name=config_next,
+                            symbols=rule,
+                            position=0,
+                            next=next,
+                        )
+
                         todo.append((new_core, lookahead))
 
         return ItemSet(closure)
