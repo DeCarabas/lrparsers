@@ -2978,6 +2978,7 @@ class Grammar:
     _nonterminals: dict[str, NonTerminal]
     _trivia: list[Terminal]
     _precedence: dict[str, typing.Tuple[Assoc, int]]
+    _preclist: PrecedenceList
 
     def __init__(
         self,
@@ -2994,6 +2995,7 @@ class Grammar:
         if precedence is None:
             precedence = []
         assert precedence is not None
+        self._preclist = precedence
 
         if trivia is None:
             trivia = []
@@ -3026,6 +3028,9 @@ class Grammar:
 
     def get_precedence(self, name: str) -> None | tuple[Assoc, int]:
         return self._precedence.get(name)
+
+    def precedence(self) -> PrecedenceList:
+        return self._preclist
 
     def desugar(self) -> typing.Tuple[list[typing.Tuple[str, list[str]]], set[str]]:
         """Convert the rules into a flat list of productions.
