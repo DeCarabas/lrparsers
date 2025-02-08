@@ -4,7 +4,7 @@
 .PHONY: test
 test:
 	python3 ./parser/parser.py
-	pdm run python3 -m pytest
+	uv run python3 -m pytest
 
 .PHONY: dep
 dep: lrparser.mk
@@ -18,7 +18,7 @@ include lrparser.mk
 wheel: dist/lrparsers-$(VERSION)-py3-none-any.whl
 
 dist/lrparsers-$(VERSION).tar.gz dist/lrparsers-$(VERSION)-py3-none-any.whl: pyproject.toml $(PYTHON_SOURCES)
-	pdm build --no-clean
+	uv build --no-clean
 
 .PHONY: clean
 clean:
