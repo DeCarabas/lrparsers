@@ -236,6 +236,20 @@ class ItemSet:
 
     def __init__(self, items=None):
         self.items = items or {}
+        self._hash = None
+
+    def __hash__(self):
+        # TODO: FREEZE
+        if self._hash is None:
+            self._hash = hash(tuple((key, frozenset(value)) for key, value in self.items.items()))
+
+        return self._hash
+
+    def __eq__(self, other):
+        if not isinstance(other, ItemSet):
+            return False
+
+        return self.items == other.items
 
     def weakly_compatible(self, other: "ItemSet") -> bool:
         a = self.items

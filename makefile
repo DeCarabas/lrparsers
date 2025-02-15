@@ -18,7 +18,7 @@ include lrparser.mk
 wheel: dist/lrparsers-$(VERSION)-py3-none-any.whl
 
 dist/lrparsers-$(VERSION).tar.gz dist/lrparsers-$(VERSION)-py3-none-any.whl: pyproject.toml $(PYTHON_SOURCES)
-	uv build --no-clean
+	uv build --offline #--no-clean
 
 .PHONY: clean
 clean:
