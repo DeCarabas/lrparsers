@@ -12,59 +12,66 @@ about doing fun things with grammars.
 
 ## Making Grammars
 
-To get started, create a grammar that derives from the `Grammar`
-class. Create one method per non-terminal, decorated with the `rule`
-decorator. Here's an example:
+To get started, create one function per non-terminal, decorated with
+the `rule` decorator, and one instance of a `Terminal` object for each
+terminal. Then tie it all together with an instance of a Grammar
+object.
+
+Here's an example:
 
 ```python {.numberLines}
     from parser import *
 
-    class SimpleGrammar(Grammar):
-        start = "expression"
+    @rule
+    def expression():
+        return seq(expression, PLUS, term) | term
 
-        @rule
-        def expression(self):
-            return seq(self.expression, self.PLUS, self.term) | self.term
+    @rule
+    def term():
+        return seq(LPAREN, expression, RPAREN) | ID
 
-        @rule
-        def term(self):
-            return seq(self.LPAREN, self.expression, self.RPAREN) | self.ID
+    PLUS = Terminal('PLUS', '+')
+    LPAREN = Terminal('LPAREN', '(')
+    RPAREN = Terminal('RPAREN', ')')
+    ID = Terminal(
+        'ID',
+        Re.seq(
+            Re.set(("a", "z"), ("A", "Z"), "_"),
+            Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
+        ),
+    )
 
-        PLUS = Terminal('+')
-        LPAREN = Terminal('(')
-        RPAREN = Terminal(')')
-        ID = Terminal(
-            Re.seq(
-                Re.set(("a", "z"), ("A", "Z"), "_"),
-                Re.set(("a", "z"), ("A", "Z"), ("0", "9"), "_").star(),
-            ),
-        )
+    SimpleGrammar = Grammar(
+        name="Simple",
+        start=expression,
+    )
 ```
 
-Terminals can be plain strings or regular expressions constructed with
-the `Re` object. (Ironically, I guess this library is not clever
-enough to parse a regular expression string into one of these
-structures. If you want to build one, go nuts! It's just Python, you
-can do whatever you want so long as the result is an `Re` object.)
+Terminal patterns can be plain strings or regular expressions
+constructed with the `Re` object. (Ironically, I guess this library is
+not clever enough to parse a regular expression string into one of
+these structures. If you want to build one, go nuts! It's just Python,
+you can do whatever you want so long as the result is an `Re` object.)
 
 Productions can be built out of terminals and non-terminals,
 concatenated with the `seq` function or the `+` operator. Alternatives
 can be expressed with the `alt` function or the `|` operator. These
 things can be freely nested, as desired.
 
-There are no helpers (yet!) for consuming lists, so they need to be
-constructed in the classic context-free grammar way:
+You can make lists in the classic context-free grammar way:
 
 ```python {.numberLines}
-    class NumberList(Grammar):
-        start = "list"
+    @rule
+    def list():
+        return NUMBER | (list + COMMA + NUMBER)
 
-        @rule
-        def list(self):
-            return self.NUMBER | (self.list + self.COMMA + self.NUMBER)
+    NUMBER = Terminal(Re.set(("0", "9")).plus())
+    COMMA = Terminal(',')
 
-        NUMBER = Terminal(Re.set(("0", "9")).plus())
-        COMMA = Terminal(',')
+    NumberList = Grammar(
+      name="NumberList",
+      start=list,
+    )
 ```
 
 (Unlike with PEGs, you can write grammars with left or right-recursion,
@@ -90,21 +97,23 @@ which means they don't generate nodes in the tree and just dump their
 contents into the parent node instead.
 
 ```python {.numberLines}
-    class NumberList(Grammar):
-        start = "list"
+    @rule
+    def list():
+        # The starting rule can't be transparent: there has to be something to
+        # hold on to!
+        return transparent_list
 
-        @rule
-        def list(self):
-            # The starting rule can't be transparent: there has to be something to
-            # hold on to!
-            return self.transparent_list
+    @rule(transparent=True)
+    def transparent_list() -> Rule:
+        return NUMBER | (transparent_list + COMMA + NUMBER)
 
-        @rule(transparent=True)
-        def transparent_list(self) -> Rule:
-            return self.NUMBER | (self.transparent_list + self.COMMA + self.NUMBER)
+    NUMBER = Terminal(Re.set(("0", "9")).plus())
+    COMMA = Terminal(',')
 
-        NUMBER = Terminal(Re.set(("0", "9")).plus())
-        COMMA = Terminal(',')
+    NumberList = Grammar(
+      name="NumberList",
+      start=list,
+    )
 ```
 
 This grammar will generate the far more useful tree:
@@ -123,22 +132,45 @@ following the lead set by tree-sitter, and so the grammar above is
 probably better-written as:
 
 ```python {.numberLines}
-    class NumberList(Grammar):
-        start = "list"
+    @rule
+    def list():
+        # The starting rule can't be transparent: there has to be something to
+        # hold on to!
+        return transparent_list
 
-        @rule
-        def list(self):
-            return self._list
+    @rule
+    def _list() -> Rule:
+        return NUMBER | (_list + COMMA + NUMBER)
 
-        @rule
-        def _list(self):
-            return self.NUMBER | (self._list + self.COMMA + self.NUMBER)
+    NUMBER = Terminal(Re.set(("0", "9")).plus())
+    COMMA = Terminal(',')
 
-        NUMBER = Terminal(Re.set(("0", "9")).plus())
-        COMMA = Terminal(',')
+    NumberList = Grammar(
+      name="NumberList",
+      start=list,
+    )
 ```
 
 That will generate the same tree, but a little more succinctly.
+
+Of course, it's a lot of work to write these transparent recursive
+rules by hand all the time, so there are helpers that do it for you:
+
+```python {.numberLines}
+    @rule
+    def list():
+        return zero_or_more(NUMBER, COMMA) + NUMBER
+
+    NUMBER = Terminal(Re.set(("0", "9")).plus())
+    COMMA = Terminal(',')
+
+    NumberList = Grammar(
+      name="NumberList",
+      start=list,
+    )
+```
+
+Much better.
 
 ### Trivia
 
@@ -150,23 +182,21 @@ To allow (and ignore) spaces, newlines, tabs, and carriage-returns in
 our number lists, we would modify the grammar as follows:
 
 ```python {.numberLines}
-    class NumberList(Grammar):
-        start = "list"
-        trivia = ["BLANKS"] # <- Add a `trivia` member
+    @rule
+    def list():
+        return zero_or_more(NUMBER, COMMA) + NUMBER
 
-        @rule
-        def list(self):
-            return self._list
+    NUMBER = Terminal(Re.set(("0", "9")).plus())
+    COMMA = Terminal(',')
 
-        @rule
-        def _list(self):
-            return self.NUMBER | (self._list + self.COMMA + self.NUMBER)
+    BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
+    # ^ and add a new terminal to describe what we're ignoring...
 
-        NUMBER = Terminal(Re.set(("0", "9")).plus())
-        COMMA = Terminal(',')
-
-        BLANKS = Terminal(Re.set(" ", "\t", "\r", "\n").plus())
-        # ^ and add a new terminal to describe it
+    NumberList = Grammar(
+      name="NumberList",
+      start=list,
+      trivia=[BLANKS],
+    )
 ```
 
 Now we can parse a list with spaces! "1  , 2,   3" will parse happily
