@@ -8,6 +8,22 @@ from dataclasses import dataclass
 from . import parser
 
 
+def offset_to_line_column(lines: list[int], pos: int) -> tuple[int, int]:
+    """Convert a text offset to a line number and column number given a list
+    of line break positions. This is used to make errors intelligible. Lines
+    are 1-based, and columns are 0-based, in accordance with editor
+    traditions.
+    """
+    line_index = bisect.bisect_left(lines, pos)
+    if line_index == 0:
+        col_start = 0
+    else:
+        col_start = lines[line_index - 1] + 1
+    column_index = pos - col_start
+    line_index += 1
+    return (line_index, column_index)
+
+
 @dataclass
 class TokenValue:
     kind: str
@@ -597,21 +613,16 @@ class Parser:
         if errors:
             lines = tokens.lines()
             for parse_error in errors:
-                line_index = bisect.bisect_left(lines, parse_error.start)
-                if line_index == 0:
-                    col_start = 0
-                else:
-                    col_start = lines[line_index - 1] + 1
-                column_index = parse_error.start - col_start
-                line_index += 1
-
+                line_index, column_index = offset_to_line_column(lines, parse_error.start)
                 error_strings.append(f"{line_index}:{column_index}: {parse_error.message}")
 
         return (result, error_strings)
 
 
 def generic_tokenize(
-    src: str, table: parser.LexerTable
+    src: str,
+    table: parser.LexerTable,
+    lines: list[int],
 ) -> typing.Iterable[tuple[parser.Terminal, int, int]]:
     pos = 0
     state = 0
@@ -647,7 +658,8 @@ def generic_tokenize(
                 pass
 
         if last_accept is None:
-            raise Exception(f"Token error at {pos}")
+            line_index, column_index = offset_to_line_column(lines, pos)
+            raise Exception(f"{line_index}:{column_index}: Unexpected character '{src[pos]}'")
 
         yield (last_accept, start, last_accept_pos - start)
 
@@ -661,10 +673,10 @@ class GenericTokenStream:
     def __init__(self, src: str, lexer: parser.LexerTable):
         self.src = src
         self.lexer = lexer
-        self._tokens: list[typing.Tuple[parser.Terminal, int, int]] = list(
-            generic_tokenize(src, lexer)
-        )
         self._lines = [m.start() for m in re.finditer("\n", src)]
+        self._tokens: list[typing.Tuple[parser.Terminal, int, int]] = list(
+            generic_tokenize(src, lexer, self._lines)
+        )
 
     def tokens(self):
         return self._tokens
