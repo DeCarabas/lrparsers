@@ -55,8 +55,7 @@ concatenated with the `seq` function or the `+` operator. Alternatives
 can be expressed with the `alt` function or the `|` operator. These
 things can be freely nested, as desired.
 
-There are no helpers (yet!) for consuming lists, so they need to be
-constructed in the classic context-free grammar way:
+You can make lists in the classic context-free grammar way:
 
 ```python
 @rule
